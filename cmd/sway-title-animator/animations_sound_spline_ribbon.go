@@ -35,20 +35,21 @@ func splineSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) strin
 			audio.Bands,
 			position*float64(audioBandCount-1),
 		)
-		mask := int(chars[index] - 0x2800)
+		baseMask := int(chars[index] - 0x2800)
 		oscillation := math.Sin(
 			float64(index)*0.19 - float64(phase)*0.065 +
 				audio.Centroid*math.Pi,
 		)
 		amplitude := 0.30 + energy*1.45 + audio.Level*0.35 + beatLift*0.85
 		shift := int(math.Round(oscillation * math.Min(2.4, amplitude)))
-		mask = shiftSplineBrailleMask(mask, shift)
+		mask := shiftSplineBrailleMask(baseMask, shift)
 		if energy+beatLift*0.55 > 0.52 {
 			thickenDirection := 1
 			if oscillation < 0 {
 				thickenDirection = -1
 			}
-			mask |= shiftSplineBrailleMask(mask, thickenDirection)
+			mask |= baseMask
+			mask |= shiftSplineBrailleMask(baseMask, thickenDirection)
 		}
 		chars[index] = rune(0x2800 + mask)
 	}
