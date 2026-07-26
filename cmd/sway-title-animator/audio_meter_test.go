@@ -627,7 +627,7 @@ func TestAuroraSoundUsesQuietFallbackAndAudioBands(t *testing.T) {
 	}
 }
 
-func TestAuroraSoundNeedlesRepresentPeakStrength(t *testing.T) {
+func TestAuroraSoundPeaksUseTallestNormalBars(t *testing.T) {
 	normalPeak := audioSnapshot{
 		Active:     true,
 		Level:      0.5,
@@ -652,18 +652,22 @@ func TestAuroraSoundNeedlesRepresentPeakStrength(t *testing.T) {
 	}
 
 	normalFrame := auroraSoundArtWithSnapshot(40, 1, normalPeak)
-	if !strings.ContainsRune(normalFrame, '╿') || strings.ContainsRune(normalFrame, '┃') {
-		t.Fatalf("expected only light needles for normal peaks, got %q", normalFrame)
-	}
 	extremeFrame := auroraSoundArtWithSnapshot(40, 1, extremePeak)
-	if !strings.ContainsRune(extremeFrame, '┃') {
-		t.Fatalf("expected heavy needles for extreme peaks, got %q", extremeFrame)
+	if strings.ContainsAny(normalFrame+extremeFrame, "╿┃") {
+		t.Fatalf("Aurora peaks must stay in the normal bar vocabulary: normal=%q extreme=%q",
+			normalFrame, extremeFrame)
+	}
+	if !strings.ContainsRune(extremeFrame, '█') {
+		t.Fatalf("expected extreme peaks to reach the tallest bar, got %q", extremeFrame)
 	}
 }
 
 func TestAuroraSoundKeepsSeveralBarHeightsUnderLiveSizedBands(t *testing.T) {
 	audio := audioSnapshot{Active: true, Level: 0.62, Peak: 0.74}
-	audio.Bands = [audioBandCount]float64{0.31, 0.47, 0.68, 0.54, 0.79, 0.43, 0.71, 0.36}
+	pattern := []float64{0.31, 0.47, 0.68, 0.54, 0.96, 0.43, 0.81, 0.36}
+	for index := range audio.Bands {
+		audio.Bands[index] = pattern[index%len(pattern)]
+	}
 
 	frame := auroraSoundArtWithSnapshot(96, 37, audio)
 	heights := make(map[rune]bool)
@@ -677,6 +681,35 @@ func TestAuroraSoundKeepsSeveralBarHeightsUnderLiveSizedBands(t *testing.T) {
 	}
 	if !strings.ContainsAny(frame, "▇█") {
 		t.Fatalf("expected live-sized bands to reach the upper bar range, got %q", frame)
+	}
+}
+
+func TestAuroraSoundMapsBassLeftAndTrebleRight(t *testing.T) {
+	bass := audioSnapshot{Active: true, Level: 0.3}
+	treble := bass
+	bass.Bands[0], bass.Bands[1] = 1, 1
+	treble.Bands[audioBandCount-2], treble.Bands[audioBandCount-1] = 1, 1
+
+	energyCenter := func(frame string) float64 {
+		total, weighted := 0, 0
+		for index, glyph := range []rune(frame) {
+			height := slices.Index(auroraBars, glyph)
+			if height < 0 {
+				continue
+			}
+			total += height
+			weighted += index * height
+		}
+		if total == 0 {
+			return 0
+		}
+		return float64(weighted) / float64(total)
+	}
+	bassCenter := energyCenter(auroraSoundArtWithSnapshot(100, 37, bass))
+	trebleCenter := energyCenter(auroraSoundArtWithSnapshot(100, 37, treble))
+	if bassCenter >= 40 || trebleCenter <= 60 || trebleCenter-bassCenter < 30 {
+		t.Fatalf("Aurora frequency axis must read bass-left/highs-right: bass=%.2f treble=%.2f",
+			bassCenter, trebleCenter)
 	}
 }
 
@@ -745,6 +778,12 @@ func TestSpectrumSoundPeakAndSilenceRemainRecognizable(t *testing.T) {
 }
 
 func TestWaveSoundUsesAudioFeaturesAndLocalOnsetSurge(t *testing.T) {
+	originalSeed := animationSeed
+	animationSeed = 0x5eed
+	t.Cleanup(func() {
+		animationSeed = originalSeed
+	})
+
 	audio := audioSnapshot{
 		Active:     true,
 		Level:      0.65,
@@ -762,8 +801,11 @@ func TestWaveSoundUsesAudioFeaturesAndLocalOnsetSurge(t *testing.T) {
 		Position: 0.8,
 	}
 	frame := waveSoundArtWithSnapshot(80, 31, audio)
-	if !strings.ContainsAny(frame, "▁▂▃▅▇█≈") {
+	if !strings.ContainsAny(frame, "▁▂▃▅▇█≈≋") {
 		t.Fatalf("wave_sound must preserve Wave's swell vocabulary: %q", frame)
+	}
+	if !strings.ContainsRune(frame, '≋') {
+		t.Fatalf("recent onset must leave one deterministic local surge marker: %q", frame)
 	}
 	if strings.ContainsAny(frame, "┃╿") {
 		t.Fatalf("wave_sound must remain distinct from Aurora's needles: %q", frame)

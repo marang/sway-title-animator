@@ -16,14 +16,34 @@ func TestCometSoundLaunchesOnlyFromBassOnsets(t *testing.T) {
 	noOnset := audio
 	noOnset.OnsetCount = 0
 	noOnset.Onsets = [audioEventCapacity]audioOnset{}
-	if baseline := cometSoundArtWithSnapshot(80, 20, noOnset); withoutBass != baseline {
-		t.Fatalf("general onset must not add a comet:\nbaseline=%q\ngeneral=%q",
+	if baseline := cometSoundArtWithSnapshot(80, 20, noOnset); strings.Count(withoutBass, "☄") != strings.Count(baseline, "☄") {
+		t.Fatalf("general onset may pulse points but must not launch another comet:\nbaseline=%q\ngeneral=%q",
 			baseline, withoutBass)
 	}
 	audio.Onsets[0].Region = audioRegionBass
 	withBass := cometSoundArtWithSnapshot(80, 20, audio)
 	if !strings.ContainsRune(withBass, '☄') || !strings.ContainsAny(withBass, "░▒▓") {
 		t.Fatalf("bass onset should launch a comet with a tail: %q", withBass)
+	}
+}
+
+func TestCometSoundPointsPulseOnBeat(t *testing.T) {
+	calm := audioSnapshot{Active: true, Level: 0.25}
+	beat := calm
+	beat.OnsetCount = 1
+	beat.Onsets[0] = audioOnset{
+		ID: 13, Age: 40 * time.Millisecond, Strength: 1,
+		Region: audioRegionGeneral,
+	}
+	calmFrame := cometSoundArtWithSnapshot(140, 40, calm)
+	beatFrame := cometSoundArtWithSnapshot(140, 40, beat)
+	if strings.Count(beatFrame, "●") <= strings.Count(calmFrame, "●") {
+		t.Fatalf("beat should pulse distributed comet particles: calm=%q beat=%q",
+			calmFrame, beatFrame)
+	}
+	if strings.Count(beatFrame, "☄") != strings.Count(calmFrame, "☄") {
+		t.Fatalf("point pulse must not add or remove comet heads: calm=%q beat=%q",
+			calmFrame, beatFrame)
 	}
 }
 

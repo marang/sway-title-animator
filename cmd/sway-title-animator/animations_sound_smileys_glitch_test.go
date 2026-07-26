@@ -51,7 +51,7 @@ func TestSmileysSoundDotsPulseOnBeat(t *testing.T) {
 		t.Fatalf("beat should pulse distributed points: calm=%q beat=%q",
 			calmFrame, beatFrame)
 	}
-	if smileysSoundBeatPulse(beat) <= 0.8 {
+	if soundBeatPulse(beat) <= 0.8 {
 		t.Fatal("fresh strong beat should produce a strong point pulse")
 	}
 }

@@ -20,7 +20,7 @@ func smileysSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 		return string(chars)
 	}
 	mids := (audio.LowMid + audio.HighMid) / 2
-	beatPulse := smileysSoundBeatPulse(audio)
+	beatPulse := soundBeatPulse(audio)
 	for index := range chars {
 		if chars[index] != ' ' {
 			continue
@@ -53,19 +53,6 @@ func smileysSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 		copy(chars[position:min(width, position+len(reaction))], reaction)
 	}
 	return string(chars)
-}
-
-func smileysSoundBeatPulse(audio audioSnapshot) float64 {
-	onset, ok := newestSoundOnset(audio, audioRegionGeneral)
-	if !ok || onset.Age < 0 {
-		return 0
-	}
-	const lifetime = 520 * time.Millisecond
-	if onset.Age >= lifetime {
-		return 0
-	}
-	progress := float64(onset.Age) / float64(lifetime)
-	return onset.Strength * (1 - smoothstep(progress))
 }
 
 func smileysSoundReaction(audio audioSnapshot) bool {

@@ -69,6 +69,34 @@ func TestConstellationSoundSupernovaAndFluxFollowStereo(t *testing.T) {
 	}
 }
 
+func TestConstellationSoundPointsPulseAcrossTheFieldOnBeat(t *testing.T) {
+	calm := audioSnapshot{Active: true, Level: 0.25}
+	beat := calm
+	beat.OnsetCount = 1
+	beat.Onsets[0] = audioOnset{
+		ID: 11, Age: 40 * time.Millisecond, Strength: 1,
+		Region: audioRegionGeneral,
+	}
+	calmFrame := constellationSoundArtWithSnapshot(140, 40, calm)
+	beatFrame := constellationSoundArtWithSnapshot(140, 40, beat)
+	if strings.Count(beatFrame, "●") <= strings.Count(calmFrame, "●") {
+		t.Fatalf("beat should pulse distributed constellation points: calm=%q beat=%q",
+			calmFrame, beatFrame)
+	}
+	quarters := 0
+	runes := []rune(beatFrame)
+	for start := 0; start < len(runes); start += len(runes) / 4 {
+		end := min(len(runes), start+len(runes)/4)
+		if strings.ContainsRune(string(runes[start:end]), '●') {
+			quarters++
+		}
+	}
+	if quarters < 3 {
+		t.Fatalf("point pulse should span the field, reached %d quarters in %q",
+			quarters, beatFrame)
+	}
+}
+
 func TestCircuitSoundBandsCurrentMidsAndTreble(t *testing.T) {
 	audio := audioSnapshot{
 		Active: true, LowMid: 0.1, HighMid: 0.1, Treble: 1, OnsetCount: 1,

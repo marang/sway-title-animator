@@ -169,10 +169,9 @@ func radarArt(width int, phase int) string {
 	}
 
 	span := float64(width)
-	headClock := float64(phase)*1.05 + signedOrganicNoise("radar", 1, float64(phase)/54)*7
 	echoClock := float64(phase)*0.48 + signedOrganicNoise("radar", 2, float64(phase)/71)*11
 	secondaryClock := float64(phase)*0.36 + signedOrganicNoise("radar", 3, float64(phase)/93)*9
-	head := math.Mod(headClock+span*100, span)
+	head := radarHeadPosition(width, phase)
 	echo := math.Mod(echoClock+span*0.57+span*100, span)
 	secondary := math.Mod(span-1-secondaryClock+span*100, span)
 	contacts := organicEvents("radar", 4, float64(phase), 29, 18, 34)
@@ -211,6 +210,16 @@ func radarArt(width int, phase int) string {
 		}
 	}
 	return string(chars)
+}
+
+func radarHeadPosition(width int, phase int) float64 {
+	if width <= 0 {
+		return 0
+	}
+	span := float64(width)
+	headClock := float64(phase)*1.05 +
+		signedOrganicNoise("radar", 1, float64(phase)/54)*7
+	return math.Mod(headClock+span*100, span)
 }
 
 func constellationArt(width int, phase int) string {

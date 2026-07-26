@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"strings"
 	"time"
 )
 
@@ -217,18 +218,22 @@ func soundRipple(width int, onset audioOnset) (float64, float64, float64, float6
 		return 0, 0, 0, 0, false
 	}
 
-	stereo := (math.Max(-1, math.Min(1, onset.Position)) + 1) / 2
-	centerPosition := stereo
+	stereo := math.Max(-1, math.Min(1, onset.Position))
+	centerPosition := 0.12 + eventRandom(
+		"ripples_sound_center",
+		1,
+		int64(onset.ID),
+		1,
+	)*0.76
 	switch onset.Region {
 	case audioRegionBass:
-		centerPosition = 0.5 + (stereo-0.5)*0.45
+		centerPosition = centerPosition*0.85 + 0.5*0.15 + stereo*0.05
 	case audioRegionHigh:
-		if stereo < 0.5 {
-			centerPosition = 0.18 + stereo*0.34
-		} else {
-			centerPosition = 0.65 + (stereo-0.5)*0.34
-		}
+		centerPosition += stereo * 0.14
+	default:
+		centerPosition += stereo * 0.10
 	}
+	centerPosition = math.Max(0.06, math.Min(0.94, centerPosition))
 	progress := float64(onset.Age) / float64(lifetime)
 	center := centerPosition * float64(max(0, width-1))
 	radius := progress * speed * float64(width)
@@ -264,26 +269,19 @@ func radarSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) string
 	if width == 0 {
 		return ""
 	}
+	chars := fitRunes(radarArt(width, phase), width)
+	if !audio.Active {
+		return string(chars)
+	}
 
-	levels := make([]float64, width)
 	contacts := make([]float64, width)
 	center := float64(width-1) / 2
 	bass := audio.Bass
 	mids := (audio.LowMid + audio.HighMid) / 2
 	treble := audio.Treble
-	speed := 0.18
-	sweep := radarSoundSweepPosition(width, phase, speed)
-	sweepWidth := 2.6 + bass*8.0
-	for index := range width {
-		distance := wrappedDistance(float64(index), sweep, float64(width))
-		levels[index] = math.Max(0, 1-distance/sweepWidth)
-	}
 
 	targetWidth := 0.65 + mids*3.2
-	targetWeight := 0.30
-	if audio.Active {
-		targetWeight += bass * 0.70
-	}
+	targetWeight := 0.22 + bass*0.72
 	for index := range width {
 		distance := math.Abs(float64(index) - center)
 		if distance <= targetWidth {
@@ -308,42 +306,31 @@ func radarSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) string
 		}
 	}
 
-	chars := make([]rune, width)
-	sweepIndex := int(math.Round(sweep)) % width
+	head := radarHeadPosition(width, phase)
+	sweepWidth := 6.0 + bass*8.0
 	for index := range width {
+		distance := wrappedDistance(float64(index), head, float64(width))
+		sweepLevel := math.Max(0, 1-distance/sweepWidth)
 		switch {
 		case contacts[index] > 0.78:
 			chars[index] = '◆'
 		case contacts[index] > 0.48:
 			chars[index] = '●'
-		case index == sweepIndex:
+		case distance < 0.55:
 			chars[index] = radarSweep[(phase/3)%len(radarSweep)]
-		case audio.Active && treble > 0.32 &&
+		case sweepLevel > 0.72 &&
+			strings.ContainsRune(" ┄─═", chars[index]):
+			chars[index] = '═'
+		case sweepLevel > 0.38 && strings.ContainsRune(" ┄─", chars[index]):
+			chars[index] = '─'
+		case sweepLevel > 0.14 && chars[index] == ' ':
+			chars[index] = '┄'
+		case treble > 0.32 && chars[index] == ' ' &&
 			(index+phase/4)%max(11, 25-int(math.Round(treble*8))) == 0:
 			chars[index] = '·'
-		case levels[index] > 0.72:
-			chars[index] = '═'
-		case levels[index] > 0.38:
-			chars[index] = '─'
-		case levels[index] > 0.12:
-			chars[index] = '┄'
-		case index == int(math.Round(center)):
-			chars[index] = '╋'
-		case !audio.Active && index%6 == 0:
-			chars[index] = '·'
-		default:
-			chars[index] = ' '
 		}
 	}
 	return string(chars)
-}
-
-func radarSoundSweepPosition(width int, phase int, speed float64) float64 {
-	if width <= 0 {
-		return 0
-	}
-	seedOffset := signedOrganicNoise("radar_sound", 1, 0.37) * float64(width) * 0.14
-	return math.Mod(float64(phase)*speed+seedOffset+float64(width)*100, float64(width))
 }
 
 func radarSoundEcho(width int, onset audioOnset, mids float64) (float64, float64, float64, bool) {

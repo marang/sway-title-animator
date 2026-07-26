@@ -196,15 +196,6 @@ func auroraSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) strin
 	}
 
 	chars := make([]rune, width)
-	timeBase := float64(phase)*0.022 +
-		signedOrganicNoise("aurora", 1, float64(phase)/86)*0.72
-	minBand := 1.0
-	maxBand := 0.0
-	for _, energy := range audio.Bands {
-		minBand = math.Min(minBand, energy)
-		maxBand = math.Max(maxBand, energy)
-	}
-	bandRange := math.Max(0.10, maxBand-minBand)
 	onset, hasOnset := newestSoundOnset(audio, audioRegionGeneral)
 	onsetEnvelope := 0.0
 	onsetCenter := 0.0
@@ -222,30 +213,24 @@ func auroraSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) strin
 		}
 		bandPosition := math.Pow(position, 0.72) * float64(audioBandCount-1)
 		energy := interpolatedAudioBand(audio.Bands, bandPosition)
-		contrast := (energy - minBand) / bandRange
-		baseLevel := auroraColumnLevel(index, phase, timeBase)
-		audioShape := energy*0.45 + contrast*0.40 + audio.Level*0.15
-		audioMix := math.Min(0.38, audio.Level*0.24+maxBand*0.14)
-		level := baseLevel*(1-audioMix) + audioShape*audioMix
+		motion := signedOrganicNoise(
+			"aurora_sound",
+			uint64(100+index/3),
+			float64(phase)/22+position*0.7,
+		)
+		level := energy*0.92 + audio.Level*0.08 +
+			motion*(0.045+energy*0.09)
 		if onsetEnvelope > 0 {
 			distance := math.Abs(float64(index) - onsetCenter)
 			spread := math.Max(2.0, float64(width)*0.045)
 			localLift := math.Exp(-math.Pow(distance/spread, 2)) *
-				onsetEnvelope * 0.34
-			level += onsetEnvelope*0.12 + localLift
+				onsetEnvelope * 0.20
+			level += localLift
 		}
 		level = math.Max(0, math.Min(1, level))
 		chars[index] = rampPick(auroraBars, level)
 	}
 
-	if onsetEnvelope >= 0.36 {
-		needleIndex := max(0, min(width-1, int(math.Round(onsetCenter))))
-		if onsetEnvelope >= 0.72 && audio.Peak >= 0.72 {
-			chars[needleIndex] = '┃'
-		} else {
-			chars[needleIndex] = '╿'
-		}
-	}
 	return string(chars)
 }
 
@@ -419,11 +404,7 @@ func waveSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) string 
 	}
 	if hasSurge && surgeEnvelope > 0.50 {
 		centerIndex := max(0, min(width-1, int(math.Round(surgeCenter))))
-		if chars[centerIndex] == ' ' {
-			chars[centerIndex] = '▅'
-		} else {
-			chars[centerIndex] = '≈'
-		}
+		chars[centerIndex] = '≋'
 	}
 	return string(chars)
 }
@@ -508,6 +489,9 @@ func ripplesBaseLevels(width int, phase int) []float64 {
 
 func ripplesLevelsArt(levels []float64, phase int) string {
 	chars := make([]rune, len(levels))
+	for index := range chars {
+		chars[index] = ' '
+	}
 	for index, level := range levels {
 		switch {
 		case level > 0.88:

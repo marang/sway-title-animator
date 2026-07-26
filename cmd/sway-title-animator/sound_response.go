@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"math"
 	"slices"
+	"time"
 )
 
 const soundBandBlurRadius = 1
@@ -60,6 +61,19 @@ func calmSoundBandEnergy(value float64) float64 {
 func calmSoundTransient(value float64) float64 {
 	value = math.Max(0, math.Min(1, value))
 	return math.Pow(value, 0.72)
+}
+
+func soundBeatPulse(audio audioSnapshot) float64 {
+	onset, ok := newestSoundOnset(audio, audioRegionGeneral)
+	if !ok || onset.Age < 0 {
+		return 0
+	}
+	const lifetime = 520 * time.Millisecond
+	if onset.Age >= lifetime {
+		return 0
+	}
+	progress := float64(onset.Age) / float64(lifetime)
+	return onset.Strength * (1 - smoothstep(progress))
 }
 
 func calmSoundOnsets(snapshot audioSnapshot) ([audioEventCapacity]audioOnset, int) {

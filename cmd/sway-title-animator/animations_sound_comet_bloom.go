@@ -39,6 +39,7 @@ func cometSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) string
 		}
 	}
 	addCometSoundParticles(chars, phase, audio)
+	addCometSoundPointPulse(chars, phase, soundBeatPulse(audio))
 	onset, ok := newestSoundOnset(audio, audioRegionBass)
 	head, direction, envelope, live := cometSoundFlight(width, onset, audio.Centroid)
 	if !ok || !live {
@@ -70,6 +71,33 @@ func cometSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) string
 	}
 	chars[headIndex] = '☄'
 	return string(chars)
+}
+
+func addCometSoundPointPulse(chars []rune, phase int, beatPulse float64) {
+	if beatPulse <= 0 {
+		return
+	}
+	for index := range chars {
+		pulse := organicNoise(
+			"comet_sound_beat",
+			uint64(100+index),
+			float64(phase)/24,
+		)
+		switch {
+		case (chars[index] == '·' || chars[index] == '∙') &&
+			beatPulse > 0.68 && pulse > 0.28:
+			chars[index] = '●'
+		case (chars[index] == '·' || chars[index] == '∙') &&
+			beatPulse > 0.30 && pulse > 0.42:
+			chars[index] = '•'
+		case chars[index] == ' ' && pulse > 0.965-beatPulse*0.14:
+			if beatPulse > 0.68 {
+				chars[index] = '●'
+			} else {
+				chars[index] = '•'
+			}
+		}
+	}
 }
 
 func cometSoundFlight(width int, onset audioOnset, centroid float64) (float64, int, float64, bool) {

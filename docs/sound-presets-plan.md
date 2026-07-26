@@ -268,14 +268,12 @@ presets that look effectively identical.
 
 ### `aurora_sound` — implemented reference
 
-- Frequency-band energy, local spectral contrast, and Aurora's independently
-  growing base columns span the complete eight-step bar-height range even when
-  absolute monitor energy is modest.
-- A detected beat briefly lifts all columns and a stronger local cluster at its
-  stereo position, making the beat readable without freezing the organic base
-  motion.
-- A beat adds at most one short `╿`; an extreme beat becomes `┃`. Needles never
-  replace whole frequency regions.
+- Lay out the frequency field spatially with bass on the left and highs on the
+  right, spanning Aurora's complete eight-step bar-height range.
+- A detected beat briefly lifts a local cluster at its stereo position, making
+  the beat readable without freezing the frequency field.
+- Peaks stay within Aurora's normal bars; an extreme peak reaches `█` rather
+  than introducing a separate needle glyph.
 - Silence renders the unchanged base Aurora.
 
 ### `spectrum_sound` — implemented
@@ -288,7 +286,10 @@ presets that look effectively identical.
 
 ### `radar_sound` — implemented
 
-- The sweep keeps a constant tempo; bass controls its width and target weight.
+- Preserve Radar's primary sweep, two secondary currents, scanline, grid marks,
+  and organic contacts.
+- Bass broadens the existing primary sweep and increases target weight without
+  replacing the base radar display.
 - Onsets create temporary echoes at positions derived from the strongest
   frequency band.
 - Treble adds short fine-grained blips; mids widen detected targets.
@@ -299,6 +300,8 @@ presets that look effectively identical.
 
 - Preserve the drifting star field, shimmer, lanes, and moving clusters.
 - Frequency regions brighten stars already present in the base choreography.
+- Each beat briefly increases the density and weight of distributed points
+  (`·` → `•` → `●`) across the star field.
 - Strong onsets trigger one short supernova; spectral flux produces small
   shooting stars.
 - Stereo balance selects the side on which transient stars appear.
@@ -334,6 +337,8 @@ presets that look effectively identical.
 ### `comet_sound` — implemented
 
 - The complete organic base comet choreography continues under active audio.
+- Each beat briefly pulses distributed trail particles (`·` → `•` → `●`)
+  without adding or removing comet heads.
 - A bass onset launches one additional emphasized comet.
 - Overall level controls tail length and density.
 - Spectral centroid controls velocity: darker audio moves more heavily, brighter
@@ -395,8 +400,9 @@ presets that look effectively identical.
 
 - Preserve the complete distributed organic base-ripple choreography under
   active audio.
-- Each detected onset creates a new ripple at a position selected by frequency
-  region and stereo balance.
+- Each detected onset creates a new ripple at a deterministic organic position
+  across the title; stereo provides only a modest bias, so rings do not all
+  enter from one side.
 - Onset strength controls initial radius and glyph weight.
 - Bass makes broad slow ripples; treble makes narrow fast ones.
 - Overall level controls how many simultaneous ripples may survive.

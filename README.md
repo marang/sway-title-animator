@@ -19,7 +19,7 @@ Built-in animation presets:
 
 ```text
 aurora         ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁
-aurora_sound   ▁▁▂▃▇╿▅▂▁▆┃▃▁
+aurora_sound   ▇▆▅▄▃▂▁▁▂▃▅▇█
 loom           ░▒≈⌁≋░▒▓✦▓▒░≋⌁≈▒░
 loom_sound     ▒⌁≋≈▒░▒⌁≋≈▒░
 bloom          ──⌁──❧─⌁──✦
@@ -31,9 +31,9 @@ square_sound   ⎺⎺⎺⎤⎽⎽⎽⎽⎽⎡⎺⎺⎺⎤⎽⎽⎽⎡
 ripples        ·  ╴─═●═─╶
 ripples_sound      ╴─═●═─╶
 radar          ╶◜╴──┄──═●═──┄──╋──┄──
-radar_sound    ┄──═◜═──┄──◆──┄──╋
+radar_sound    ╋──┄──═◜═──┄◆──╋──┄
 constellation       ·   ✦      •    ✧
-constellation_sound ·  •    ✦       ·
+constellation_sound · ●•  ✦   ●   • ·
 circuit        ─╍──╪──═●═──╍──╼╾───
 circuit_sound  ───╾╪╼───═●═────
 glitch         ───╍╪▒▓╳──┄──
@@ -45,11 +45,11 @@ ribbon_sound   ░▒▓█◐▒░·░◑▓✦▓◒░
 shutter        ▓▷▒│░▶  ·┆·  ◀░│▒◁▓
 shutter_sound  ▒▷▓▶ · │ ┃ │ · ◀▓◁▒
 comet          ░░▒▒▓▓✶☄▓▒░░··░▒✦
-comet_sound    ···░▒▓☄      ∙
+comet_sound    ·●•░▒▓☄  •   ●∙
 smileys        ｡･ʕ•ᴥ•ʔっ･ﾟ
 smileys_sound  · • ● ʕ◉ω◉ʔ
 wave           ▁▃▅▇█◜╲▅▃▁
-wave_sound     ▁▂▃╲◜╱▇≈•▃▂▁
+wave_sound     ▁▂▃╲◜╱▇≋•▃▂▁
 spline         ⢀⣠⠤⠒⠉⠢⣀  ✦
 spline_sound   ⠒⠒⠤⠤⣀⣀⠤◇⠒
 ```
@@ -58,10 +58,10 @@ Each launch gets a fresh motion seed. Presets keep their visual identity, but
 their timing, density, drift, and occasional events evolve organically instead
 of repeating a short fixed performance.
 
-`aurora_sound` keeps Aurora's independently growing columns while frequency
-energy expands them across the full eight-step bar-height range. Beats lift a
-localized cluster and add at most one short oscilloscope needle (`╿` or `┃`),
-so the needle never replaces the bar animation. It reads
+`aurora_sound` lays its frequency field out from bass on the left to highs on
+the right and expands energy across Aurora's full eight-step bar-height range.
+Beats lift a localized cluster; even extreme peaks remain normal tallest
+Aurora bars (`█`). It reads
 `@DEFAULT_MONITOR@` through `parec`, reacts at the full configured FPS, and
 renders the normal Aurora while capture is available but silent. If capture is
 unavailable, every sound companion also renders its normal base preset

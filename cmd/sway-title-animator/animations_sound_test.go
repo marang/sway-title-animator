@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,7 @@ func TestSquareSoundAddsOnePlateauPerBeat(t *testing.T) {
 
 func TestRipplesSoundRegionsControlPositionSpeedAndWidth(t *testing.T) {
 	bass := audioOnset{
+		ID:       17,
 		Age:      300 * time.Millisecond,
 		Strength: 0.8,
 		Region:   audioRegionBass,
@@ -103,9 +105,29 @@ func TestRipplesSoundRegionsControlPositionSpeedAndWidth(t *testing.T) {
 		t.Fatalf("expected broad slow bass and narrow fast highs: bass radius=%.2f width=%.2f high radius=%.2f width=%.2f",
 			bassRadius, bassThickness, highRadius, highThickness)
 	}
-	if bassCenter <= 50 || highCenter <= bassCenter {
-		t.Fatalf("frequency region and positive stereo should bias positions right: bass=%.2f high=%.2f",
+	if bassCenter < 6 || bassCenter > 93 || highCenter < 6 || highCenter > 93 {
+		t.Fatalf("organic centers must stay inside the visible field: bass=%.2f high=%.2f",
 			bassCenter, highCenter)
+	}
+}
+
+func TestRipplesSoundOnsetsUseDistributedOrganicCenters(t *testing.T) {
+	minimum := 100.0
+	maximum := 0.0
+	for id := uint64(1); id <= 24; id++ {
+		center, _, _, _, live := soundRipple(100, audioOnset{
+			ID: id, Age: 80 * time.Millisecond, Strength: 1,
+			Region: audioRegionGeneral,
+		})
+		if !live {
+			t.Fatalf("onset %d unexpectedly expired", id)
+		}
+		minimum = math.Min(minimum, center)
+		maximum = math.Max(maximum, center)
+	}
+	if minimum >= 30 || maximum <= 70 {
+		t.Fatalf("onset centers should span the title instead of entering from one side: min=%.2f max=%.2f",
+			minimum, maximum)
 	}
 }
 
@@ -147,6 +169,10 @@ func TestRipplesSoundUsesBoundedImmutableOnsetHistory(t *testing.T) {
 func TestRipplesSoundKeepsDistributedBaseChoreographyUnderActiveAudio(t *testing.T) {
 	audio := audioSnapshot{Active: true, Level: 0.5}
 	for _, phase := range []int{0, 47, 113, 229} {
+		if base := ripplesArt(100, phase); strings.ContainsRune(base, '\x00') {
+			t.Fatalf("base ripples contains an uninitialized NUL cell at phase %d: %q",
+				phase, base)
+		}
 		if got, want := ripplesSoundArtWithSnapshot(100, phase, audio),
 			ripplesArt(100, phase); got != want {
 			t.Fatalf("active audio without onsets lost base ripples at phase %d:\ngot:  %q\nwant: %q",
@@ -180,22 +206,30 @@ func TestSoundPairSilentFormsMoveAndStayBounded(t *testing.T) {
 	}
 }
 
-func TestRadarSoundBassControlsSweepSpeedAndTargetWeight(t *testing.T) {
+func TestRadarSoundPreservesBaseSweepAndBassStrengthensIt(t *testing.T) {
 	quietBass := audioSnapshot{Active: true, Bass: 0.05, LowMid: 0.3, HighMid: 0.3}
 	loudBass := quietBass
 	loudBass.Bass = 0.95
 
-	slowStart := radarSoundSweepPosition(100, 20, 0.16+quietBass.Bass*1.75)
-	slowEnd := radarSoundSweepPosition(100, 30, 0.16+quietBass.Bass*1.75)
-	fastStart := radarSoundSweepPosition(100, 20, 0.16+loudBass.Bass*1.75)
-	fastEnd := radarSoundSweepPosition(100, 30, 0.16+loudBass.Bass*1.75)
-	if fastEnd-fastStart <= slowEnd-slowStart {
-		t.Fatalf("bass should accelerate sweep: slow %.2f fast %.2f",
-			slowEnd-slowStart, fastEnd-fastStart)
-	}
-
 	quietFrame := radarSoundArtWithSnapshot(101, 20, quietBass)
 	loudFrame := radarSoundArtWithSnapshot(101, 20, loudBass)
+	for label, frame := range map[string]string{"quiet": quietFrame, "loud": loudFrame} {
+		if !strings.ContainsAny(frame, string(radarSweep)) ||
+			!strings.ContainsRune(frame, '╋') ||
+			!strings.ContainsAny(frame, "┄─═") {
+			t.Fatalf("%s sound frame lost Radar's sweep, grid, or currents: %q",
+				label, frame)
+		}
+	}
+	sweepWeight := func(frame string) int {
+		return strings.Count(frame, "┄") +
+			strings.Count(frame, "─")*2 +
+			strings.Count(frame, "═")*3
+	}
+	if sweepWeight(loudFrame) <= sweepWeight(quietFrame) {
+		t.Fatalf("bass should broaden the existing sweep: quiet=%q loud=%q",
+			quietFrame, loudFrame)
+	}
 	if strings.Count(loudFrame, "◆")+strings.Count(loudFrame, "●") <=
 		strings.Count(quietFrame, "◆")+strings.Count(quietFrame, "●") {
 		t.Fatalf("bass should strengthen the central target: quiet=%q loud=%q", quietFrame, loudFrame)
