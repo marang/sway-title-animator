@@ -20,9 +20,14 @@ func braidSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) string
 		return string(chars)
 	}
 	mids := (audio.LowMid + audio.HighMid) / 2
+	bassCrossingSpacing := max(11, 23-int(math.Round(audio.Bass*8)))
 	for index := range chars {
 		switch {
 		case chars[index] == '╳' && audio.Bass > 0.42:
+			chars[index] = '╬'
+		case (chars[index] == '╱' || chars[index] == '╲') &&
+			audio.Bass > 0.42 &&
+			(index+phase/13)%bassCrossingSpacing == 0:
 			chars[index] = '╬'
 		case (chars[index] == '╱' || chars[index] == '╲') &&
 			(index+phase/11)%max(7, 18-int(math.Round(mids*12))) == 0:

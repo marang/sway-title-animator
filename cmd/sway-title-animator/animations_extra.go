@@ -184,7 +184,7 @@ func auroraSoundArt(width int, phase int) string {
 	)
 }
 
-const auroraSoundNeedleLifetime = 420 * time.Millisecond
+const auroraSoundOnsetLifetime = 420 * time.Millisecond
 
 func auroraSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) string {
 	width = artWidth(width)
@@ -199,8 +199,8 @@ func auroraSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) strin
 	onset, hasOnset := newestSoundOnset(audio, audioRegionGeneral)
 	onsetEnvelope := 0.0
 	onsetCenter := 0.0
-	if hasOnset && onset.Age >= 0 && onset.Age < auroraSoundNeedleLifetime {
-		progress := float64(onset.Age) / float64(auroraSoundNeedleLifetime)
+	if hasOnset && onset.Age >= 0 && onset.Age < auroraSoundOnsetLifetime {
+		progress := float64(onset.Age) / float64(auroraSoundOnsetLifetime)
 		onsetEnvelope = onset.Strength * (1 - smoothstep(progress))
 		onsetCenter = (math.Max(-1, math.Min(1, onset.Position)) + 1) *
 			0.5 * float64(width-1)

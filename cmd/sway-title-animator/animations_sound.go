@@ -176,6 +176,7 @@ func ripplesSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 	}
 
 	levels := ripplesBaseLevels(width, phase)
+	audioLevels := make([]float64, width)
 	firstOnset := max(0, min(audio.OnsetCount, len(audio.Onsets))-2)
 	for onsetIndex := firstOnset; onsetIndex < min(audio.OnsetCount, len(audio.Onsets)); onsetIndex++ {
 		onset := audio.Onsets[onsetIndex]
@@ -192,9 +193,19 @@ func ripplesSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 				ring = math.Max(ring, impact)
 			}
 			levels[index] = math.Max(levels[index], ring)
+			audioLevels[index] = math.Max(audioLevels[index], ring)
 		}
 	}
-	return ripplesLevelsArt(levels, phase)
+	chars := []rune(ripplesLevelsArt(levels, phase))
+	for index, level := range audioLevels {
+		switch {
+		case level > 0.68:
+			chars[index] = '◉'
+		case level > 0.35:
+			chars[index] = '◎'
+		}
+	}
+	return string(chars)
 }
 
 func soundRipple(width int, onset audioOnset) (float64, float64, float64, float64, bool) {

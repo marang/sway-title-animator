@@ -87,6 +87,7 @@ func TestSquareSoundAddsOnePlateauPerBeat(t *testing.T) {
 }
 
 func TestRipplesSoundRegionsControlPositionSpeedAndWidth(t *testing.T) {
+	const width = 100
 	bass := audioOnset{
 		ID:       17,
 		Age:      300 * time.Millisecond,
@@ -96,8 +97,8 @@ func TestRipplesSoundRegionsControlPositionSpeedAndWidth(t *testing.T) {
 	}
 	high := bass
 	high.Region = audioRegionHigh
-	bassCenter, bassRadius, bassThickness, _, bassLive := soundRipple(100, bass)
-	highCenter, highRadius, highThickness, _, highLive := soundRipple(100, high)
+	bassCenter, bassRadius, bassThickness, _, bassLive := soundRipple(width, bass)
+	highCenter, highRadius, highThickness, _, highLive := soundRipple(width, high)
 	if !bassLive || !highLive {
 		t.Fatal("expected both regional ripples to be live")
 	}
@@ -105,7 +106,10 @@ func TestRipplesSoundRegionsControlPositionSpeedAndWidth(t *testing.T) {
 		t.Fatalf("expected broad slow bass and narrow fast highs: bass radius=%.2f width=%.2f high radius=%.2f width=%.2f",
 			bassRadius, bassThickness, highRadius, highThickness)
 	}
-	if bassCenter < 6 || bassCenter > 93 || highCenter < 6 || highCenter > 93 {
+	minimumCenter := 0.06 * float64(width-1)
+	maximumCenter := 0.94 * float64(width-1)
+	if bassCenter < minimumCenter || bassCenter > maximumCenter ||
+		highCenter < minimumCenter || highCenter > maximumCenter {
 		t.Fatalf("organic centers must stay inside the visible field: bass=%.2f high=%.2f",
 			bassCenter, highCenter)
 	}
@@ -148,8 +152,11 @@ func TestRipplesSoundUsesBoundedImmutableOnsetHistory(t *testing.T) {
 		Position: 0.7,
 	}
 	frame := ripplesSoundArtWithSnapshot(100, 31, audio)
-	if !strings.ContainsAny(frame, "●═─╴╶") {
+	if !strings.ContainsAny(frame, "●◎◉═─╴╶") {
 		t.Fatalf("expected audio-driven ripple rings, got %q", frame)
+	}
+	if !strings.ContainsAny(frame, "◎◉") {
+		t.Fatalf("expected active onset rings to use distinct target cores, got %q", frame)
 	}
 	if repeated := ripplesSoundArtWithSnapshot(100, 31, audio); repeated != frame {
 		t.Fatal("fixed onset history must render deterministically")
@@ -207,6 +214,12 @@ func TestSoundPairSilentFormsMoveAndStayBounded(t *testing.T) {
 }
 
 func TestRadarSoundPreservesBaseSweepAndBassStrengthensIt(t *testing.T) {
+	originalSeed := animationSeed
+	animationSeed = 0x5eed
+	t.Cleanup(func() {
+		animationSeed = originalSeed
+	})
+
 	quietBass := audioSnapshot{Active: true, Bass: 0.05, LowMid: 0.3, HighMid: 0.3}
 	loudBass := quietBass
 	loudBass.Bass = 0.95

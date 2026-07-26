@@ -290,8 +290,8 @@ presets that look effectively identical.
   and organic contacts.
 - Bass broadens the existing primary sweep and increases target weight without
   replacing the base radar display.
-- Onsets create temporary echoes at positions derived from the strongest
-  frequency band.
+- Onsets create temporary echoes positioned by their frequency region and
+  stereo location.
 - Treble adds short fine-grained blips; mids widen detected targets.
 - Stereo balance places new echoes left or right of center.
 - Silence renders the unchanged base radar.
@@ -404,8 +404,11 @@ presets that look effectively identical.
   across the title; stereo provides only a modest bias, so rings do not all
   enter from one side.
 - Onset strength controls initial radius and glyph weight.
+- Active sound marks the strongest ring cores with `◉`, keeping the preset
+  visibly distinct from other sparse organic animations.
 - Bass makes broad slow ripples; treble makes narrow fast ones.
-- Overall level controls how many simultaneous ripples may survive.
+- The two newest entries in the bounded onset history may add simultaneous
+  sound-driven rings.
 - Silence renders the unchanged base ripples.
 
 ### `bloom_sound` — implemented

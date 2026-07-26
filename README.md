@@ -29,7 +29,7 @@ spectrum_sound ⟨·─━▆▇┃▇▆━─·┃·─━▆▇┃▇▆━�
 square         ⎺⎺⎤⎽⎽⎽⎽⎽⎡⎺⎺⎺⎺⎤⎽⎽⎡
 square_sound   ⎺⎺⎺⎤⎽⎽⎽⎽⎽⎡⎺⎺⎺⎤⎽⎽⎽⎡
 ripples        ·  ╴─═●═─╶
-ripples_sound      ╴─═●═─╶
+ripples_sound      ╴─═◉═─╶
 radar          ╶◜╴──┄──═●═──┄──╋──┄──
 radar_sound    ╋──┄──═◜═──┄◆──╋──┄
 constellation       ·   ✦      •    ✧
@@ -81,8 +81,9 @@ plateau lengths and level changes duty cycle. Each beat appends exactly the next
 connected high or low plateau—starting with one new character—while the
 direction stays stable until the whole waveform is complete. `ripples_sound`
 keeps the distributed organic base rings and adds broad bass rings or narrow
-high-frequency rings from bounded onset history. During silence they render
-their complete base animations.
+high-frequency rings from bounded onset history. Active onset rings use
+`◎`/`◉` target cores to remain distinct from other sparse organic presets.
+During silence they render their complete base animations.
 
 Sound-reactive presets require the `parec` command. Install the PulseAudio
 command-line utilities for your distribution (`libpulse` on Arch Linux,

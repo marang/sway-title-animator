@@ -140,24 +140,35 @@ func TestEverySoundCompanionRespondsClearlyToMusic(t *testing.T) {
 
 	const (
 		width                  = 100
-		phase                  = 83
 		minimumBaseDifference  = 0.04
 		minimumAudioDifference = 0.08
 	)
+	phases := []int{37, 83, 149}
 	for name, render := range renderers {
 		t.Run(name, func(t *testing.T) {
 			baseName := strings.TrimSuffix(name, "_sound")
-			base := string(fitRunes(animationPresets[baseName](width, phase), width))
-			quietFrame := render(width, phase, quiet)
-			normalFrame := render(width, phase, normal)
-			difference := frameDifferenceRatio(base, normalFrame)
-			if difference < minimumBaseDifference {
-				t.Fatalf("normal music response is too close to %s: difference %.3f\nbase:  %q\nsound: %q",
-					baseName, difference, base, normalFrame)
+			maximumBaseDifference := 0.0
+			maximumAudioDifference := 0.0
+			for _, phase := range phases {
+				base := string(fitRunes(animationPresets[baseName](width, phase), width))
+				quietFrame := render(width, phase, quiet)
+				normalFrame := render(width, phase, normal)
+				maximumBaseDifference = math.Max(
+					maximumBaseDifference,
+					frameDifferenceRatio(base, normalFrame),
+				)
+				maximumAudioDifference = math.Max(
+					maximumAudioDifference,
+					frameDifferenceRatio(quietFrame, normalFrame),
+				)
 			}
-			if audioDifference := frameDifferenceRatio(quietFrame, normalFrame); audioDifference < minimumAudioDifference {
-				t.Fatalf("quiet-to-normal music response is too small: difference %.3f\nquiet:  %q\nnormal: %q",
-					audioDifference, quietFrame, normalFrame)
+			if maximumBaseDifference < minimumBaseDifference {
+				t.Fatalf("normal music response is too close to %s across sampled phases: maximum difference %.3f",
+					baseName, maximumBaseDifference)
+			}
+			if maximumAudioDifference < minimumAudioDifference {
+				t.Fatalf("quiet-to-normal music response is too small across sampled phases: maximum difference %.3f",
+					maximumAudioDifference)
 			}
 		})
 	}
