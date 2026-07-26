@@ -7,6 +7,12 @@ import (
 )
 
 func TestConstellationSoundMapsBandsToFixedStarRegions(t *testing.T) {
+	originalSeed := animationSeed
+	animationSeed = 0x5eed
+	t.Cleanup(func() {
+		animationSeed = originalSeed
+	})
+
 	audio := audioSnapshot{Active: true}
 	for index := range audio.Bands {
 		if index < audioBandCount/2 {

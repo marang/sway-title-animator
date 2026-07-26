@@ -461,13 +461,15 @@ func TestAudioOnsetClassesUseIndependentCooldowns(t *testing.T) {
 	}
 	for index, region := range []audioRegion{audioRegionGeneral, audioRegionBass, audioRegionHigh} {
 		onset := meter.onsets[index]
-		if onset.region != region || onset.id != uint64(index+1) || onset.position != 0.75 {
+		if onset.region != region || onset.id != uint64(index+1) ||
+			onset.sequence != 1 || onset.position != 0.75 {
 			t.Fatalf("unexpected onset %d: %+v", index, onset)
 		}
 	}
 
 	meter.detectOnsets(now.Add(audioOnsetCooldown), 0.8, 0.7, 0.6, -0.5)
-	if len(meter.onsets) != 4 || meter.onsets[3].region != audioRegionGeneral {
+	if len(meter.onsets) != 4 || meter.onsets[3].region != audioRegionGeneral ||
+		meter.onsets[3].sequence != 2 {
 		t.Fatalf("general cooldown should elapse before region cooldowns: %+v", meter.onsets)
 	}
 	meter.detectOnsets(now.Add(audioRegionCooldown), 0, 0.7, 0.6, -0.5)
@@ -501,6 +503,9 @@ func TestAudioOnsetHistoryIsBoundedOrderedAndImmutable(t *testing.T) {
 	if snapshot.Onsets[0].ID != 3 || snapshot.Onsets[audioEventCapacity-1].ID != 10 {
 		t.Fatalf("expected oldest events to be discarded in order: %+v", snapshot.Onsets)
 	}
+	if snapshot.Onsets[audioEventCapacity-1].Sequence == 0 {
+		t.Fatal("snapshot must preserve the region-local onset sequence")
+	}
 	if snapshot.Onsets[0].Age != 18*time.Millisecond {
 		t.Fatalf("expected deterministic event age, got %s", snapshot.Onsets[0].Age)
 	}
@@ -532,7 +537,8 @@ func TestAudioOnsetHistoryExpiresAndCaptureResetClearsDetector(t *testing.T) {
 	meter.lastBassOnset = start
 	meter.clear()
 	if meter.spectralFlux != 0 || meter.peak != 0 || meter.hasPreviousBands ||
-		len(meter.onsets) != 0 || !meter.lastBassOnset.IsZero() {
+		len(meter.onsets) != 0 || !meter.lastBassOnset.IsZero() ||
+		meter.regionOnsetCounts != [3]uint64{} {
 		t.Fatalf(
 			"capture reset left detector state: flux=%.3f peak=%.3f previous=%t onsets=%d cooldown=%s",
 			meter.spectralFlux,
@@ -622,8 +628,24 @@ func TestAuroraSoundUsesQuietFallbackAndAudioBands(t *testing.T) {
 }
 
 func TestAuroraSoundNeedlesRepresentPeakStrength(t *testing.T) {
-	normalPeak := audioSnapshot{Active: true, Level: 0.5}
-	extremePeak := audioSnapshot{Active: true, Level: 0.5}
+	normalPeak := audioSnapshot{
+		Active:     true,
+		Level:      0.5,
+		Peak:       0.7,
+		OnsetCount: 1,
+		Onsets: [audioEventCapacity]audioOnset{{
+			ID: 1, Age: 50 * time.Millisecond, Strength: 0.62, Position: -0.4,
+		}},
+	}
+	extremePeak := audioSnapshot{
+		Active:     true,
+		Level:      0.5,
+		Peak:       0.9,
+		OnsetCount: 1,
+		Onsets: [audioEventCapacity]audioOnset{{
+			ID: 2, Age: 20 * time.Millisecond, Strength: 0.9, Position: 0.4,
+		}},
+	}
 	for index := range normalPeak.Bands {
 		normalPeak.Bands[index] = 0.76
 		extremePeak.Bands[index] = 0.90
@@ -636,6 +658,25 @@ func TestAuroraSoundNeedlesRepresentPeakStrength(t *testing.T) {
 	extremeFrame := auroraSoundArtWithSnapshot(40, 1, extremePeak)
 	if !strings.ContainsRune(extremeFrame, '┃') {
 		t.Fatalf("expected heavy needles for extreme peaks, got %q", extremeFrame)
+	}
+}
+
+func TestAuroraSoundKeepsSeveralBarHeightsUnderLiveSizedBands(t *testing.T) {
+	audio := audioSnapshot{Active: true, Level: 0.62, Peak: 0.74}
+	audio.Bands = [audioBandCount]float64{0.31, 0.47, 0.68, 0.54, 0.79, 0.43, 0.71, 0.36}
+
+	frame := auroraSoundArtWithSnapshot(96, 37, audio)
+	heights := make(map[rune]bool)
+	for _, glyph := range frame {
+		if strings.ContainsRune(string(auroraBars), glyph) {
+			heights[glyph] = true
+		}
+	}
+	if len(heights) < 5 {
+		t.Fatalf("expected at least five visible bar heights, got %d in %q", len(heights), frame)
+	}
+	if !strings.ContainsAny(frame, "▇█") {
+		t.Fatalf("expected live-sized bands to reach the upper bar range, got %q", frame)
 	}
 }
 
@@ -703,7 +744,7 @@ func TestSpectrumSoundPeakAndSilenceRemainRecognizable(t *testing.T) {
 	}
 }
 
-func TestWaveSoundUsesAudioFeaturesAndOnsetBreakers(t *testing.T) {
+func TestWaveSoundUsesAudioFeaturesAndLocalOnsetSurge(t *testing.T) {
 	audio := audioSnapshot{
 		Active:     true,
 		Level:      0.65,
@@ -721,14 +762,11 @@ func TestWaveSoundUsesAudioFeaturesAndOnsetBreakers(t *testing.T) {
 		Position: 0.8,
 	}
 	frame := waveSoundArtWithSnapshot(80, 31, audio)
-	if !strings.ContainsAny(frame, "◜◝◞◟╱╲") {
-		t.Fatalf("expected a breaker from the recent onset, got %q", frame)
+	if !strings.ContainsAny(frame, "▁▂▃▅▇█≈") {
+		t.Fatalf("wave_sound must preserve Wave's swell vocabulary: %q", frame)
 	}
-	if !strings.ContainsAny(frame, "─⌁⌒≈") {
-		t.Fatalf("wave_sound must preserve a continuous swell vocabulary: %q", frame)
-	}
-	if strings.ContainsAny(frame, "▁▂▃▄▅▆▇█┃╿") {
-		t.Fatalf("wave_sound must remain distinct from Aurora bars: %q", frame)
+	if strings.ContainsAny(frame, "┃╿") {
+		t.Fatalf("wave_sound must remain distinct from Aurora's needles: %q", frame)
 	}
 
 	withoutOnset := audio
@@ -742,43 +780,37 @@ func TestWaveSoundUsesAudioFeaturesAndOnsetBreakers(t *testing.T) {
 	}
 }
 
-func TestWaveSoundBreakerDirectionFollowsStereoPosition(t *testing.T) {
-	rightward := audioOnset{
+func TestWaveSoundSurgeStaysInPlaceAndFades(t *testing.T) {
+	onset := audioOnset{
 		ID:       1,
 		Strength: 1,
 		Region:   audioRegionGeneral,
 		Position: 0.8,
 	}
-	leftward := rightward
-	leftward.Position = -0.8
-
-	rightward.Age = 150 * time.Millisecond
-	rightStart, _, ok := waveSoundBreaker(80, rightward)
+	onset.Age = 80 * time.Millisecond
+	startCenter, startSpread, startEnvelope, ok := waveSoundSurge(80, onset)
 	if !ok {
-		t.Fatal("expected a live rightward breaker")
+		t.Fatal("expected a live local surge")
 	}
-	rightward.Age = 600 * time.Millisecond
-	rightEnd, _, _ := waveSoundBreaker(80, rightward)
-	if rightEnd <= rightStart {
-		t.Fatalf("positive stereo position must travel right: start=%.2f end=%.2f", rightStart, rightEnd)
-	}
-
-	leftward.Age = 150 * time.Millisecond
-	leftStart, _, ok := waveSoundBreaker(80, leftward)
+	onset.Age = 500 * time.Millisecond
+	endCenter, endSpread, endEnvelope, ok := waveSoundSurge(80, onset)
 	if !ok {
-		t.Fatal("expected a live leftward breaker")
+		t.Fatal("expected the later local surge to remain live")
 	}
-	leftward.Age = 600 * time.Millisecond
-	leftEnd, _, _ := waveSoundBreaker(80, leftward)
-	if leftEnd >= leftStart {
-		t.Fatalf("negative stereo position must travel left: start=%.2f end=%.2f", leftStart, leftEnd)
+	if endCenter != startCenter {
+		t.Fatalf("local surge must not travel in from a side: start=%.2f end=%.2f",
+			startCenter, endCenter)
 	}
-	if _, _, live := waveSoundBreaker(80, audioOnset{
+	if endSpread <= startSpread || endEnvelope >= startEnvelope {
+		t.Fatalf("surge should broaden and fade: spread %.2f->%.2f envelope %.2f->%.2f",
+			startSpread, endSpread, startEnvelope, endEnvelope)
+	}
+	if _, _, _, live := waveSoundSurge(80, audioOnset{
 		Age:      2 * time.Second,
 		Strength: 1,
 		Region:   audioRegionGeneral,
 	}); live {
-		t.Fatal("expired breaker motion must not survive in the renderer")
+		t.Fatal("expired local surge must not survive in the renderer")
 	}
 }
 

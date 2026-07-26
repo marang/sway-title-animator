@@ -60,6 +60,62 @@ func TestEverySoundCompanionKeepsMovingWithSteadyAudio(t *testing.T) {
 	}
 }
 
+func TestReworkedSoundCompanionsPreserveBaseTemporalChoreography(t *testing.T) {
+	originalSeed := animationSeed
+	animationSeed = 0x1ab53
+	t.Cleanup(func() {
+		animationSeed = originalSeed
+	})
+
+	audio := steadySoundTestSnapshot()
+	audio.OnsetCount = 0
+	audio.Onsets = [audioEventCapacity]audioOnset{}
+	renderers := map[string]func(int, int, audioSnapshot) string{
+		"bloom_sound":  bloomSoundArtWithSnapshot,
+		"braid_sound":  braidSoundArtWithSnapshot,
+		"comet_sound":  cometSoundArtWithSnapshot,
+		"ribbon_sound": ribbonSoundArtWithSnapshot,
+		"spline_sound": splineSoundArtWithSnapshot,
+		"wave_sound":   waveSoundArtWithSnapshot,
+	}
+	phases := []int{0, 6, 12, 18, 24, 30, 36, 42}
+
+	for name, render := range renderers {
+		t.Run(name, func(t *testing.T) {
+			baseName := strings.TrimSuffix(name, "_sound")
+			baseMotion := 0.0
+			soundMotion := 0.0
+			uniqueSoundFrames := map[string]bool{}
+			for index, phase := range phases {
+				base := animationPresets[baseName](100, phase)
+				sound := render(100, phase, audio)
+				uniqueSoundFrames[sound] = true
+				if index == 0 {
+					continue
+				}
+				previousPhase := phases[index-1]
+				baseMotion += frameDifferenceRatio(
+					animationPresets[baseName](100, previousPhase),
+					base,
+				)
+				soundMotion += frameDifferenceRatio(
+					render(100, previousPhase, audio),
+					sound,
+				)
+			}
+			if len(uniqueSoundFrames) < len(phases)-1 {
+				t.Fatalf("sound companion dropped base motion: %d/%d unique frames",
+					len(uniqueSoundFrames), len(phases))
+			}
+			minimumMotion := math.Max(0.05, baseMotion*0.35)
+			if soundMotion < minimumMotion {
+				t.Fatalf("sound motion %.3f lost too much base choreography %.3f",
+					soundMotion, baseMotion)
+			}
+		})
+	}
+}
+
 func TestEverySoundCompanionRespondsClearlyToMusic(t *testing.T) {
 	renderers := soundSnapshotRenderers()
 	quiet := steadySoundTestSnapshot()

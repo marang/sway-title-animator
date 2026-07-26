@@ -48,20 +48,7 @@ func auroraArt(width int, phase int) string {
 	sparkEvents := organicEvents("aurora", 2, float64(phase), 41, 10, 22)
 
 	for index := range width {
-		offset := animationRandom("aurora", 3, int64(index))
-		rise := math.Mod(timeBase+offset, 1.0)
-		// Grow each column upward, then let it settle softly before the next lift.
-		lift := 0.0
-		if rise < 0.74 {
-			lift = smoothstep(rise / 0.74)
-		} else {
-			lift = 1.0 - smoothstep((rise-0.74)/0.26)*0.82
-		}
-		swellPhase := float64(phase)*0.018 + signedOrganicNoise("aurora", uint64(20+index%7), float64(phase)/63)*0.9
-		swell := (math.Sin(float64(index)*0.19+swellPhase) + 1.0) * 0.5
-		breath := organicNoise("aurora", uint64(40+index%13), float64(phase)/92+float64(index)*0.03)
-		level := 0.12 + 0.64*lift + 0.16*swell + 0.08*breath
-		level = math.Max(0.0, math.Min(1.0, level))
+		level := auroraColumnLevel(index, phase, timeBase)
 		glyph := rampPick(auroraBars, level)
 		for _, event := range sparkEvents {
 			center := eventRandom("aurora", 2, event.Index, 4) * float64(width-1)
@@ -75,6 +62,28 @@ func auroraArt(width int, phase int) string {
 		chars = append(chars, glyph)
 	}
 	return string(chars)
+}
+
+func auroraColumnLevel(index int, phase int, timeBase float64) float64 {
+	offset := animationRandom("aurora", 3, int64(index))
+	rise := math.Mod(timeBase+offset, 1.0)
+	// Grow each column upward, then let it settle softly before the next lift.
+	lift := 0.0
+	if rise < 0.74 {
+		lift = smoothstep(rise / 0.74)
+	} else {
+		lift = 1.0 - smoothstep((rise-0.74)/0.26)*0.82
+	}
+	swellPhase := float64(phase)*0.018 +
+		signedOrganicNoise("aurora", uint64(20+index%7), float64(phase)/63)*0.9
+	swell := (math.Sin(float64(index)*0.19+swellPhase) + 1.0) * 0.5
+	breath := organicNoise(
+		"aurora",
+		uint64(40+index%13),
+		float64(phase)/92+float64(index)*0.03,
+	)
+	level := 0.12 + 0.64*lift + 0.16*swell + 0.08*breath
+	return math.Max(0.0, math.Min(1.0, level))
 }
 
 func spectrumArt(width int, phase int) string {
@@ -306,7 +315,10 @@ func braidArt(width int, phase int) string {
 	knots := organicEvents("braid", 4, float64(phase), 43, 16, 30)
 	for index := range width {
 		waveA := math.Sin(float64(index)*tightness + timeA)
-		waveB := math.Sin(float64(index)*tightness - timeB + math.Pi)
+		// Keep the second strand phase-offset from the first. Mirroring the
+		// phase can make both strands coincide across the entire title for
+		// unlucky seeds, collapsing the braid into a static row of crosses.
+		waveB := -math.Sin(float64(index)*tightness + timeB + 0.72)
 		cross := math.Abs(waveA - waveB)
 		for _, event := range knots {
 			center := eventRandom("braid", 4, event.Index, 2) * float64(width-1)

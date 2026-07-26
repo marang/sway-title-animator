@@ -13,8 +13,12 @@ func TestCometSoundLaunchesOnlyFromBassOnsets(t *testing.T) {
 		Region: audioRegionGeneral, Position: 1,
 	}
 	withoutBass := cometSoundArtWithSnapshot(80, 20, audio)
-	if strings.ContainsRune(withoutBass, '☄') {
-		t.Fatalf("general onset must not launch a comet: %q", withoutBass)
+	noOnset := audio
+	noOnset.OnsetCount = 0
+	noOnset.Onsets = [audioEventCapacity]audioOnset{}
+	if baseline := cometSoundArtWithSnapshot(80, 20, noOnset); withoutBass != baseline {
+		t.Fatalf("general onset must not add a comet:\nbaseline=%q\ngeneral=%q",
+			baseline, withoutBass)
 	}
 	audio.Onsets[0].Region = audioRegionBass
 	withBass := cometSoundArtWithSnapshot(80, 20, audio)
@@ -69,6 +73,12 @@ func TestCometSoundSilenceUsesCompleteBaseAnimation(t *testing.T) {
 }
 
 func TestBloomSoundMidsBassBalanceAndPollenPreserveForm(t *testing.T) {
+	originalSeed := animationSeed
+	animationSeed = 0x5eed
+	t.Cleanup(func() {
+		animationSeed = originalSeed
+	})
+
 	base := audioSnapshot{
 		Active: true, Level: 0.8, Bass: 0.2, LowMid: 0.1, HighMid: 0.1,
 		Treble: 1, Balance: -1, OnsetCount: 1,
@@ -83,8 +93,8 @@ func TestBloomSoundMidsBassBalanceAndPollenPreserveForm(t *testing.T) {
 	wideAudio.HighMid = 1
 	wideAudio.Bass = 1
 	wide := bloomSoundArtWithSnapshot(100, 20, wideAudio)
-	if strings.Count(wide, "⌁") <= strings.Count(narrow, "⌁") {
-		t.Fatalf("mids should emphasize existing petal tips: narrow=%q wide=%q", narrow, wide)
+	if strings.Count(wide, "❧") <= strings.Count(narrow, "❧") {
+		t.Fatalf("mids should strengthen existing petal tips: narrow=%q wide=%q", narrow, wide)
 	}
 	if !strings.ContainsRune(wide, '━') {
 		t.Fatalf("bass should strengthen the stem: %q", wide)

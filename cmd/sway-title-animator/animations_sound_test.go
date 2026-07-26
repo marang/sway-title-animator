@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math"
 	"strings"
 	"testing"
 	"time"
@@ -40,57 +39,49 @@ func TestSquareSoundBassAndLevelShapeConnectedTrace(t *testing.T) {
 	}
 }
 
-func TestSquareSoundBuildAndRunnerFollowStereoDirection(t *testing.T) {
-	right := audioSnapshot{Active: true, Level: 0.5, Bass: 0.5, Balance: 0.8}
-	left := right
-	left.Balance = -0.8
-	rightFrame := []rune(squareSoundArtWithSnapshot(80, 10, right))
-	leftFrame := []rune(squareSoundArtWithSnapshot(80, 10, left))
-	if rightFrame[0] == ' ' || rightFrame[len(rightFrame)-1] != ' ' {
-		t.Fatalf("positive balance should build from the left: %q", string(rightFrame))
-	}
-	if leftFrame[0] != ' ' || leftFrame[len(leftFrame)-1] == ' ' {
-		t.Fatalf("negative balance should build from the right: %q", string(leftFrame))
-	}
-
-	base := squareSoundLevels(80, 61, right)
-	rightRunner := append([]bool(nil), base...)
-	leftRunner := append([]bool(nil), base...)
-	onset := audioOnset{
-		Age:      650 * time.Millisecond,
-		Strength: 1,
-		Region:   audioRegionGeneral,
-		Position: 0.8,
-	}
-	applySquareSoundRunner(rightRunner, onset)
-	onset.Position = -0.8
-	applySquareSoundRunner(leftRunner, onset)
-	if changedCenter(base, rightRunner) <= changedCenter(base, leftRunner) {
-		t.Fatalf("runner directions did not separate: right=%.1f left=%.1f",
-			changedCenter(base, rightRunner), changedCenter(base, leftRunner))
+func TestSquareSoundBuildDirectionStaysStableForCompleteWave(t *testing.T) {
+	audio := audioSnapshot{Active: true, Level: 0.5, Bass: 0.5, OnsetCount: 1}
+	levels := squareSoundLevels(100, 61, audio)
+	runCount := transitions(levels) + 1
+	side := 0
+	for sequence := 1; sequence < runCount; sequence++ {
+		audio.Onsets[0] = audioOnset{
+			ID: uint64(sequence), Sequence: uint64(sequence),
+			Age: time.Second, Strength: 1, Region: audioRegionGeneral,
+		}
+		frame := []rune(squareSoundArtWithSnapshot(100, 61, audio))
+		currentSide := 1
+		if frame[0] == ' ' {
+			currentSide = -1
+		}
+		if side == 0 {
+			side = currentSide
+		} else if currentSide != side {
+			t.Fatalf("build direction changed before wave completed at beat %d", sequence)
+		}
 	}
 }
 
-func TestSquareSoundRunnerStrengthControlsLengthAndSpeed(t *testing.T) {
-	onset := audioOnset{
-		Age:      220 * time.Millisecond,
-		Strength: 0.3,
-		Region:   audioRegionGeneral,
-		Position: 1,
+func TestSquareSoundAddsOnePlateauPerBeat(t *testing.T) {
+	audio := audioSnapshot{Active: true, Level: 0.5, Bass: 0.5, OnsetCount: 1}
+	render := func(sequence uint64, age time.Duration) string {
+		audio.Onsets[0] = audioOnset{
+			ID: sequence, Sequence: sequence, Age: age,
+			Strength: 1, Region: audioRegionGeneral,
+		}
+		return squareSoundArtWithSnapshot(100, 61, audio)
 	}
-	weak, weakOK := squareSoundRunner(100, onset)
-	onset.Strength = 1
-	strong, strongOK := squareSoundRunner(100, onset)
-	if !weakOK || !strongOK {
-		t.Fatal("expected both runners to be live")
+
+	first := len([]rune(strings.ReplaceAll(render(1, time.Second), " ", "")))
+	secondStart := len([]rune(strings.ReplaceAll(render(2, 0), " ", "")))
+	second := len([]rune(strings.ReplaceAll(render(2, time.Second), " ", "")))
+	if second <= first {
+		t.Fatalf("second beat should append its plateau: first=%d second=%d",
+			first, second)
 	}
-	if strong.barLength <= weak.barLength {
-		t.Fatalf("strong runner should overwrite more trace: weak=%d strong=%d",
-			weak.barLength, strong.barLength)
-	}
-	if strong.left <= weak.left {
-		t.Fatalf("strong runner should travel faster: weak=%d strong=%d",
-			weak.left, strong.left)
+	if secondStart != first+1 {
+		t.Fatalf("fresh beat should begin with one new connected character: first=%d start=%d",
+			first, secondStart)
 	}
 }
 
@@ -146,10 +137,21 @@ func TestRipplesSoundUsesBoundedImmutableOnsetHistory(t *testing.T) {
 	expired.Onsets[0].Age = 2 * time.Second
 	expired.Onsets[1].Age = 2 * time.Second
 	if idle := ripplesSoundArtWithSnapshot(100, 31, expired); idle == frame {
-		t.Fatal("expired onsets must fall back to the subtle idle pulse")
+		t.Fatal("expired onsets must fall back to the complete base choreography")
 	}
 	if audio.Onsets[0].Age != 180*time.Millisecond {
 		t.Fatal("renderer must not mutate the immutable onset snapshot")
+	}
+}
+
+func TestRipplesSoundKeepsDistributedBaseChoreographyUnderActiveAudio(t *testing.T) {
+	audio := audioSnapshot{Active: true, Level: 0.5}
+	for _, phase := range []int{0, 47, 113, 229} {
+		if got, want := ripplesSoundArtWithSnapshot(100, phase, audio),
+			ripplesArt(100, phase); got != want {
+			t.Fatalf("active audio without onsets lost base ripples at phase %d:\ngot:  %q\nwant: %q",
+				phase, got, want)
+		}
 	}
 }
 
@@ -327,19 +329,4 @@ func countHigh(levels []bool) int {
 		}
 	}
 	return count
-}
-
-func changedCenter(first []bool, second []bool) float64 {
-	sum := 0.0
-	count := 0
-	for index := range min(len(first), len(second)) {
-		if first[index] != second[index] {
-			sum += float64(index)
-			count++
-		}
-	}
-	if count == 0 {
-		return math.NaN()
-	}
-	return sum / float64(count)
 }

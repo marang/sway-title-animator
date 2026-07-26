@@ -20,22 +20,11 @@ func squareSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) strin
 	}
 
 	levels := squareSoundLevels(width, phase, audio)
-	if onset, ok := newestSoundOnset(audio, audioRegionGeneral); ok {
-		applySquareSoundRunner(levels, onset)
-	}
 	segments := renderSquareLevels(levels)
 	if audio.Active {
-		const buildFrames = 52
-		position := phase % 156
-		if position < 0 {
-			position += 156
+		if onset, ok := newestSoundOnset(audio, audioRegionGeneral); ok {
+			revealSquareSoundBeat(segments, levels, onset)
 		}
-		revealed := width
-		if position < buildFrames {
-			progress := smoothstep(float64(position) / buildFrames)
-			revealed = int(math.Ceil(progress * float64(width)))
-		}
-		revealSquareSegments(segments, revealed, audio.Balance >= 0)
 	}
 	return squareSegmentsArt(segments)
 }
@@ -82,35 +71,68 @@ func squareSoundLevels(width int, phase int, audio audioSnapshot) []bool {
 	return levels
 }
 
-func applySquareSoundRunner(levels []bool, onset audioOnset) {
-	runner, ok := squareSoundRunner(len(levels), onset)
-	if !ok {
+func revealSquareSoundBeat(
+	segments []squareSegment,
+	levels []bool,
+	onset audioOnset,
+) {
+	if len(segments) == 0 || onset.Age < 0 {
 		return
 	}
-	applySquareRunner(levels, runner)
+	runCount := 1
+	for index := 1; index < len(levels); index++ {
+		if levels[index] != levels[index-1] {
+			runCount++
+		}
+	}
+
+	sequence := onset.Sequence
+	if sequence == 0 {
+		sequence = max(uint64(1), onset.ID)
+	}
+	zeroBased := sequence - 1
+	runIndex := int(zeroBased % uint64(runCount))
+	buildCycle := int64(zeroBased / uint64(runCount))
+	leftToRight := eventRandom(
+		"square_sound_direction",
+		1,
+		buildCycle,
+		1,
+	) < 0.5
+
+	runEnds := squareSoundRunEnds(levels, leftToRight)
+	previous := 0
+	if runIndex > 0 {
+		previous = runEnds[runIndex-1]
+	}
+	target := runEnds[runIndex]
+	duration := 160*time.Millisecond +
+		time.Duration((1-onset.Strength)*float64(140*time.Millisecond))
+	progress := 1.0
+	if onset.Age < duration {
+		progress = smoothstep(float64(onset.Age) / float64(duration))
+	}
+	revealed := previous + max(1, int(math.Ceil(progress*float64(target-previous))))
+	revealSquareSegments(segments, revealed, leftToRight)
 }
 
-func squareSoundRunner(width int, onset audioOnset) (squareRunner, bool) {
-	const (
-		minimumDuration = 900 * time.Millisecond
-		durationRange   = 650 * time.Millisecond
-	)
-	duration := minimumDuration + time.Duration((1-onset.Strength)*float64(durationRange))
-	if onset.Age < 0 || onset.Age >= duration || width < 6 {
-		return squareRunner{}, false
+func squareSoundRunEnds(levels []bool, leftToRight bool) []int {
+	if len(levels) == 0 {
+		return nil
 	}
-	progress := smoothstep(float64(onset.Age) / float64(duration))
-	barLength := 4 + int(math.Round(onset.Strength*12))
-	packetWidth := min(width, barLength+4)
-	last := max(0, width-packetWidth)
-	left := int(math.Round(progress * float64(last)))
-	if onset.Position < 0 {
-		left = last - left
+	ends := make([]int, 0, len(levels))
+	for revealed := 1; revealed < len(levels); revealed++ {
+		previous := revealed - 1
+		current := revealed
+		if !leftToRight {
+			previous = len(levels) - revealed
+			current = previous - 1
+		}
+		if levels[previous] != levels[current] {
+			ends = append(ends, revealed)
+		}
 	}
-	return squareRunner{
-		left:      left,
-		barLength: min(barLength, max(2, packetWidth-4)),
-	}, true
+	return append(ends, len(levels))
 }
 
 func squareSegmentsArt(segments []squareSegment) string {
@@ -145,9 +167,14 @@ func ripplesSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 	if width == 0 {
 		return ""
 	}
+	if width < 8 {
+		return string(fitRunes(ripplesArt(width, phase), width))
+	}
+	if !audio.Active {
+		return string(fitRunes(ripplesArt(width, phase), width))
+	}
 
-	levels := make([]float64, width)
-	live := false
+	levels := ripplesBaseLevels(width, phase)
 	firstOnset := max(0, min(audio.OnsetCount, len(audio.Onsets))-2)
 	for onsetIndex := firstOnset; onsetIndex < min(audio.OnsetCount, len(audio.Onsets)); onsetIndex++ {
 		onset := audio.Onsets[onsetIndex]
@@ -155,7 +182,6 @@ func ripplesSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 		if !ok {
 			continue
 		}
-		live = true
 		for index := range width {
 			distance := math.Abs(float64(index) - center)
 			ring := math.Exp(-math.Pow((distance-radius)/thickness, 2)) * envelope
@@ -167,10 +193,7 @@ func ripplesSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 			levels[index] = math.Max(levels[index], ring)
 		}
 	}
-	if !live {
-		addSoundRippleIdle(levels, phase)
-	}
-	return soundRippleLevelsArt(levels)
+	return ripplesLevelsArt(levels, phase)
 }
 
 func soundRipple(width int, onset audioOnset) (float64, float64, float64, float64, bool) {
@@ -212,46 +235,6 @@ func soundRipple(width int, onset audioOnset) (float64, float64, float64, float6
 	envelope := onset.Strength * (1 - smoothstep(progress))
 	thickness *= 0.65 + onset.Strength*0.55
 	return center, radius, thickness, envelope, true
-}
-
-func addSoundRippleIdle(levels []float64, phase int) {
-	if len(levels) == 0 {
-		return
-	}
-	breath := 0.5 + 0.5*math.Sin(
-		float64(phase)*0.022+signedOrganicNoise("ripples_sound", 1, float64(phase)/173),
-	)
-	center := float64(len(levels)-1) / 2
-	center += signedOrganicNoise("ripples_sound", 2, 0.41) *
-		math.Min(3, float64(len(levels))/12)
-	radius := 1.5 + breath*math.Min(5, float64(len(levels))/8)
-	for index := range levels {
-		distance := math.Abs(float64(index) - center)
-		levels[index] = math.Exp(-math.Pow((distance-radius)/1.35, 2)) * (0.24 + breath*0.16)
-	}
-}
-
-func soundRippleLevelsArt(levels []float64) string {
-	chars := make([]rune, len(levels))
-	for index, level := range levels {
-		switch {
-		case level > 0.84:
-			chars[index] = '●'
-		case level > 0.62:
-			chars[index] = '═'
-		case level > 0.38:
-			chars[index] = '─'
-		case level > 0.16:
-			if index%2 == 0 {
-				chars[index] = '╴'
-			} else {
-				chars[index] = '╶'
-			}
-		default:
-			chars[index] = ' '
-		}
-	}
-	return string(chars)
 }
 
 func newestSoundOnset(audio audioSnapshot, region audioRegion) (audioOnset, bool) {
@@ -407,47 +390,11 @@ func shutterSoundArtWithSnapshot(width int, phase int, audio audioSnapshot) stri
 	}
 
 	center, gapRadius, closure := shutterSoundGeometry(width, phase, audio)
-	leftEdge := max(0, int(math.Floor(center-gapRadius)))
-	rightEdge := min(width-1, int(math.Ceil(center+gapRadius)))
-	heavy := audio.Active && audio.Peak >= 0.68
-	leftArrow, rightArrow, seam := '›', '‹', '┆'
-	if heavy {
-		leftArrow, rightArrow, seam = '▶', '◀', '┃'
+	treble, peak := 0.0, 0.0
+	if audio.Active {
+		treble, peak = audio.Treble, audio.Peak
 	}
-	seamIndex := max(0, min(width-1, int(math.Round(center))))
-	chars := make([]rune, width)
-	for index := range width {
-		switch {
-		case index == leftEdge:
-			chars[index] = leftArrow
-		case index == rightEdge:
-			chars[index] = rightArrow
-		case index == seamIndex:
-			chars[index] = seam
-		case index > leftEdge && index < rightEdge:
-			if audio.Active && audio.Treble > 0.38 &&
-				(index+phase/5)%max(12, 23-int(math.Round(audio.Treble*6))) == 0 {
-				chars[index] = '│'
-			} else {
-				chars[index] = ' '
-			}
-		default:
-			distanceFromEdge := 0
-			if index < leftEdge {
-				distanceFromEdge = leftEdge - index
-			} else {
-				distanceFromEdge = index - rightEdge
-			}
-			panelLevel := math.Max(0.28, 0.94-float64(distanceFromEdge)/math.Max(3, float64(width)*0.24))
-			panelLevel *= 0.72 + closure*0.28
-			if audio.Active && audio.Treble > 0.5 && distanceFromEdge == 1 {
-				chars[index] = '│'
-			} else {
-				chars[index] = rampPick([]rune("░▒▓█"), panelLevel)
-			}
-		}
-	}
-	return string(chars)
+	return shutterFrame(width, phase, center, gapRadius, closure, treble, peak)
 }
 
 func shutterSoundGeometry(width int, phase int, audio audioSnapshot) (float64, float64, float64) {
@@ -456,6 +403,8 @@ func shutterSoundGeometry(width int, phase int, audio audioSnapshot) (float64, f
 	breath := 0.5 + 0.5*math.Sin(breathClock)
 	openness := 0.22 + breath*0.66
 	closure := 1 - openness
+	center += signedOrganicNoise("shutter", 5, float64(phase)/118) *
+		math.Min(4, float64(width)*0.035)
 	if audio.Active {
 		audioClosure := 0.08 + audio.LowMid*0.76
 		closure = closure*0.55 + audioClosure*0.45
