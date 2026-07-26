@@ -652,6 +652,12 @@ func TestSpectrumSoundMapsBassOutsideAndTrebleInside(t *testing.T) {
 }
 
 func TestSpectrumSoundPeakAndSilenceRemainRecognizable(t *testing.T) {
+	originalSeed := animationSeed
+	animationSeed = 0x5eed
+	t.Cleanup(func() {
+		animationSeed = originalSeed
+	})
+
 	quietFrames := map[string]bool{}
 	for _, phase := range []int{0, 47, 113, 229} {
 		frame := spectrumSoundArtWithSnapshot(41, phase, audioSnapshot{})
