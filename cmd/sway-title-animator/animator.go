@@ -8,10 +8,12 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/marang/sway-title-animator/internal/swayipc"
 )
 
 type TitleAnimator struct {
-	ipc                  *IPC
+	ipc                  *swayipc.Client
 	titleSetter          func(int64, string) error
 	lastFormats          map[int64]string
 	lastFormatSetAt      map[int64]time.Time
@@ -30,7 +32,7 @@ type TitleAnimator struct {
 	errorReporter        func(error)
 }
 
-func NewTitleAnimator(ipc *IPC) *TitleAnimator {
+func NewTitleAnimator(ipc *swayipc.Client) *TitleAnimator {
 	return &TitleAnimator{
 		ipc:             ipc,
 		lastFormats:     map[int64]string{},
@@ -44,12 +46,12 @@ func NewTitleAnimator(ipc *IPC) *TitleAnimator {
 }
 
 func (animator *TitleAnimator) RefreshTree(phase int) {
-	body, _, err := animator.ipc.Request(ipcGetTree, "")
+	message, err := animator.ipc.Request(swayipc.GetTree, nil)
 	if err != nil {
 		return
 	}
 	var root Node
-	if err := json.Unmarshal(body, &root); err != nil {
+	if err := json.Unmarshal(message.Payload, &root); err != nil {
 		return
 	}
 
@@ -234,7 +236,7 @@ func (animator *TitleAnimator) SetTitleFormat(conID int64, value string) error {
 		return animator.titleSetter(conID, value)
 	}
 	command := fmt.Sprintf("[con_id=%d] title_format %s", conID, quoteSwayString(value))
-	body, _, err := animator.ipc.Request(ipcRunCommand, command)
+	message, err := animator.ipc.Request(swayipc.RunCommand, []byte(command))
 	if err != nil {
 		return err
 	}
@@ -242,7 +244,7 @@ func (animator *TitleAnimator) SetTitleFormat(conID int64, value string) error {
 		Success bool   `json:"success"`
 		Error   string `json:"error"`
 	}
-	if err := json.Unmarshal(body, &results); err != nil {
+	if err := json.Unmarshal(message.Payload, &results); err != nil {
 		return fmt.Errorf("decode sway command response: %w", err)
 	}
 	if len(results) == 0 {

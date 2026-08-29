@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"sort"
 	"syscall"
 	"time"
+
+	"github.com/marang/sway-title-animator/internal/swayipc"
 )
 
 func subscribe(socket string, events chan<- struct{}, shutdown chan<- struct{}, done <-chan struct{}) {
@@ -19,30 +20,19 @@ func subscribe(socket string, events chan<- struct{}, shutdown chan<- struct{}, 
 		default:
 		}
 
-		conn, err := dialUnixSocket(socket)
+		conn, err := swayipc.Dial(socket)
 		if err != nil {
 			time.Sleep(time.Second)
 			continue
 		}
-		if err := writeFull(conn, ipcHeader(ipcSubscribe, len([]byte(`["window","workspace","shutdown"]`)))); err != nil {
-			_ = conn.Close()
-			time.Sleep(time.Second)
-			continue
-		}
-		if err := writeFull(conn, []byte(`["window","workspace","shutdown"]`)); err != nil {
-			_ = conn.Close()
-			time.Sleep(time.Second)
-			continue
-		}
-		if _, _, err := readIPCMessage(conn); err != nil {
+		if _, err := conn.Request(swayipc.Subscribe, []byte(`["window","workspace","shutdown"]`)); err != nil {
 			_ = conn.Close()
 			time.Sleep(time.Second)
 			continue
 		}
 
-		reader := bufio.NewReader(conn)
 		for {
-			body, _, err := readIPCMessage(reader)
+			message, err := conn.Read()
 			if err != nil {
 				_ = conn.Close()
 				break
@@ -50,7 +40,7 @@ func subscribe(socket string, events chan<- struct{}, shutdown chan<- struct{}, 
 			var event struct {
 				Change string `json:"change"`
 			}
-			_ = json.Unmarshal(body, &event)
+			_ = json.Unmarshal(message.Payload, &event)
 			if event.Change == "shutdown" {
 				select {
 				case shutdown <- struct{}{}:
@@ -75,7 +65,7 @@ func runLoopWithFPS(socket string, fps float64) int {
 	}
 	defer stopAudio()
 
-	control := &IPC{socket: socket}
+	control := swayipc.NewClient(socket)
 	defer control.Close()
 
 	animator := NewTitleAnimator(control)
