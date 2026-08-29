@@ -194,7 +194,9 @@ The exact schema will be finalized with tests, but its semantic shape is:
 `provider` and `label` are optional presentation metadata. Launcher fields are
 validated values, not executable command fragments. Executable paths and
 fixed argument templates come from trusted program configuration or compiled
-adapter policy.
+adapter policy. Version 1 bounds the registry at 128 contexts, matching the
+worst-case two placement operations per context under the 256-action planner
+limit.
 
 ### Layout snapshot
 
@@ -328,30 +330,37 @@ persisted semantic model.
 
 ## CLI contract
 
-The planned user-facing commands are:
+The user-facing commands are:
 
 ```text
-sway-session register [options]
-sway-session restore [context]
+sway-session register --session <name> [--cwd <path>] [--label <label>] [--provider <name>] [--id <uuid>]
+sway-session restore [--socket <path>] [context]
 sway-session list
 sway-session archive <context>
 sway-session activate <context>
-sway-session purge <context>
+sway-session purge [--yes] <context>
 ```
 
-Commands accept an unambiguous UUID or human label. Human-readable output uses
-labels first and displays shortened UUIDs only when needed. Machine consumers
-receive an explicit structured-output option rather than parsing presentation
-text.
+Commands accept an exact canonical UUID or an unambiguous exact human label.
+Human-readable output uses labels first and retains the full UUID so duplicate
+labels remain operable. Machine consumers receive an explicit structured-output
+option rather than parsing presentation text.
 
 `restore` is idempotent. `archive` removes a context from automatic restore but
 keeps its registry record and Herdr state. `activate` reverses archive. `purge`
 requires deliberate confirmation in an interactive terminal, with an explicit
 non-interactive confirmation flag for automation.
 
+Herdr session names follow Herdr's 64-byte ASCII name contract. The reserved
+name `default` is rejected because Herdr maps it to non-deletable default state.
+Concurrent restores hold the registry lock across observation and launch.
+They also recognize an exact pending Alacritty argument vector in `/proc`, so
+a process which started before its Wayland window mapped is not launched again
+after a mapping timeout.
+
 ## Herdr integration
 
-Herdr will be configured with pane history enabled:
+Herdr must be configured with pane history enabled:
 
 ```toml
 [experimental]
@@ -370,6 +379,11 @@ and session state in addition to protecting the control socket.
 The Herdr launcher uses a fixed executable and argument structure to attach to
 a validated named session. The stable Alacritty application ID is generic and
 derived from the context UUID, not from Linear or another provider.
+Before launch, `sway-session` validates owner-only, symlink-free Herdr state
+and config paths and the pane-history opt-in. Purge independently validates the
+state root, discovers the exact named session through Herdr's structured list,
+stops it if running, re-observes it, deletes it, and verifies absence before
+removing the registry entry.
 
 ## Codex and AppArmor boundary
 

@@ -41,6 +41,13 @@ func UpdateRegistry(root string, mutate func(*Registry) error) (Registry, error)
 	return RegistryFile(root).Update(initial, mutate)
 }
 
+// InspectRegistryLocked serializes an observation and its external effects
+// with all registry mutations without rewriting contexts.json.
+func InspectRegistryLocked(root string, inspect func(Registry) error) error {
+	initial := Registry{Version: ContextsSchemaVersion, Contexts: []Context{}}
+	return RegistryFile(root).InspectLocked(initial, inspect)
+}
+
 func LayoutFile(root string) statefile.JSONFile[LayoutSnapshot] {
 	return statefile.NewJSONFile(root, LayoutFilename, (*LayoutSnapshot).Validate)
 }

@@ -3,6 +3,7 @@ package statefile
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -423,6 +424,57 @@ func TestStatefileUpdateProcessHelper(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("update state: %v", err)
+	}
+}
+
+func TestInspectLockedSerializesExternalObservationWithUpdate(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	file := NewJSONFile(root, "state.json", validateTestDocument)
+	initial := testDocument{Version: 1, Value: "before"}
+	if err := file.Save(initial); err != nil {
+		t.Fatal(err)
+	}
+	inspectionStarted := make(chan struct{})
+	releaseInspection := make(chan struct{})
+	inspectionDone := make(chan error, 1)
+	go func() {
+		inspectionDone <- file.InspectLocked(testDocument{}, func(observed testDocument) error {
+			if observed != initial {
+				return fmt.Errorf("unexpected observed state: %+v", observed)
+			}
+			close(inspectionStarted)
+			<-releaseInspection
+			return nil
+		})
+	}()
+	<-inspectionStarted
+
+	mutationEntered := make(chan struct{})
+	updateDone := make(chan error, 1)
+	go func() {
+		_, err := file.Update(initial, func(candidate *testDocument) error {
+			close(mutationEntered)
+			candidate.Value = "after"
+			return nil
+		})
+		updateDone <- err
+	}()
+	select {
+	case <-mutationEntered:
+		t.Fatal("update entered while inspection held the directory lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseInspection)
+	if err := <-inspectionDone; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-mutationEntered:
+	case <-time.After(time.Second):
+		t.Fatal("update did not acquire lock after inspection completed")
+	}
+	if err := <-updateDone; err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -149,6 +149,40 @@ func (file JSONFile[T]) Update(initial T, mutate func(*T) error) (T, error) {
 	return candidate, nil
 }
 
+// InspectLocked loads the current document, or initial when it does not yet
+// exist, and invokes inspect while holding the state-directory exclusive lock.
+// It is intended for read-before-external-action workflows whose observation
+// and side effects must not race a concurrent Update using the same directory.
+// InspectLocked never writes the document itself.
+func (file JSONFile[T]) InspectLocked(initial T, inspect func(T) error) error {
+	if inspect == nil {
+		return errors.New("state inspection is nil")
+	}
+	if err := file.validatePath(); err != nil {
+		return err
+	}
+	directory, err := openStateDirectory(file.directory, true)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	if err := lockDirectory(directory, unix.LOCK_EX); err != nil {
+		return err
+	}
+	defer unlockDirectory(directory)
+
+	candidate := initial
+	if err := file.loadIntoAt(directory, &candidate); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if file.validate != nil {
+		if err := file.validate(&candidate); err != nil {
+			return fmt.Errorf("validate %s: %w", file.name, err)
+		}
+	}
+	return inspect(candidate)
+}
+
 func (file JSONFile[T]) loadIntoAt(directory *os.File, target *T) error {
 	data, err := readPrivateRegularFileAt(directory, file.name)
 	if err != nil {

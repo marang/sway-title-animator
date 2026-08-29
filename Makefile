@@ -39,7 +39,8 @@ diff-check:
 verify: fmt-check test race vet lint build diff-check
 
 install: build
-	install -Dm755 sway-title-animator $(PREFIX)/bin/sway-title-animator
+	install -d $(PREFIX)/bin
+	for binary in $(BINARIES); do install -m755 $$binary $(PREFIX)/bin/$$binary; done
 
 clean:
 	rm -f $(BINARIES)

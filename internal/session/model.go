@@ -12,6 +12,7 @@ import (
 const (
 	ContextsSchemaVersion = 1
 	LayoutSchemaVersion   = 1
+	MaxContexts           = 128
 )
 
 type ContextState string
@@ -127,6 +128,9 @@ func (registry *Registry) Validate() error {
 	if registry.Contexts == nil {
 		return errors.New("context registry must contain a contexts array")
 	}
+	if len(registry.Contexts) > MaxContexts {
+		return fmt.Errorf("context registry contains %d contexts; maximum is %d", len(registry.Contexts), MaxContexts)
+	}
 	seen := make(map[ContextID]struct{}, len(registry.Contexts))
 	seenLaunchers := make(map[launcherIdentity]int, len(registry.Contexts))
 	for index := range registry.Contexts {
@@ -178,12 +182,23 @@ func (context *Context) validate() error {
 	return context.Launcher.validate()
 }
 
+// Validate checks one context independently of a registry.
+func (context *Context) Validate() error {
+	if context == nil {
+		return errors.New("context is nil")
+	}
+	return context.validate()
+}
+
 func (launcher *Launcher) validate() error {
 	if launcher.Kind != LauncherHerdr {
 		return fmt.Errorf("unsupported launcher kind %q", launcher.Kind)
 	}
+	if launcher.Session == "default" {
+		return errors.New("launcher session name \"default\" is reserved by Herdr and cannot be purged safely")
+	}
 	if !validSessionName(launcher.Session) {
-		return errors.New("launcher session must start with a letter or digit and contain at most 128 letters, digits, dots, underscores, or hyphens")
+		return errors.New("launcher session must start with an ASCII letter or digit and contain at most 64 ASCII letters, digits, dots, underscores, or hyphens")
 	}
 	if launcher.Cwd == "" || !filepath.IsAbs(launcher.Cwd) {
 		return errors.New("launcher cwd must be an absolute path")
@@ -414,7 +429,7 @@ func containsControl(value string) bool {
 }
 
 func validSessionName(value string) bool {
-	if len(value) == 0 || len(value) > 128 {
+	if len(value) == 0 || len(value) > 64 {
 		return false
 	}
 	first := value[0]

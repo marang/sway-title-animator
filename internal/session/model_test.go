@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,13 @@ func TestRegistryRejectsUnsupportedVersion(t *testing.T) {
 	}
 	if versionError.Got != 2 || versionError.Want != ContextsSchemaVersion {
 		t.Fatalf("unexpected version error: %+v", versionError)
+	}
+}
+
+func TestRegistryBoundsContextCount(t *testing.T) {
+	registry := Registry{Version: ContextsSchemaVersion, Contexts: make([]Context, MaxContexts+1)}
+	if err := registry.Validate(); err == nil {
+		t.Fatal("expected oversized context registry rejection")
 	}
 }
 
@@ -74,6 +82,18 @@ func TestRegistryRejectsDuplicateIdentityAndUntypedLaunchData(t *testing.T) {
 			name: "option-like session",
 			mutate: func(registry *Registry) {
 				registry.Contexts[0].Launcher.Session = "--help"
+			},
+		},
+		{
+			name: "reserved default session",
+			mutate: func(registry *Registry) {
+				registry.Contexts[0].Launcher.Session = "default"
+			},
+		},
+		{
+			name: "session exceeds Herdr byte limit",
+			mutate: func(registry *Registry) {
+				registry.Contexts[0].Launcher.Session = "a" + strings.Repeat("b", 64)
 			},
 		},
 		{

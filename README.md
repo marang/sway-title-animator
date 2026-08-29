@@ -139,6 +139,7 @@ This installs:
 
 ```text
 ~/.local/bin/sway-title-animator
+~/.local/bin/sway-session
 ```
 
 Make sure `~/.local/bin` is in your `PATH`.
@@ -156,6 +157,62 @@ Then reload Sway:
 ```sh
 swaymsg reload
 ```
+
+## Persistent Work Sessions
+
+The optional `sway-session` CLI gives one explicitly registered work context
+one Alacritty window backed by one named [Herdr](https://herdr.dev/) session.
+Sway restores the outer workspace and layout; Herdr restores the terminal tabs,
+panes, supported agent sessions, and pane screen history.
+
+Install Alacritty and Herdr, then enable Herdr pane history in
+`${XDG_CONFIG_HOME:-$HOME/.config}/herdr/config.toml`:
+
+```toml
+[experimental]
+pane_history = true
+```
+
+Keep the directory and config private because pane history can contain command
+output, paths, and tokens:
+
+```sh
+chmod 700 "${XDG_CONFIG_HOME:-$HOME/.config}/herdr"
+chmod 600 "${XDG_CONFIG_HOME:-$HOME/.config}/herdr/config.toml"
+```
+
+Register the current project and start or attach its named Herdr session:
+
+```sh
+sway-session register --session lab-80 --label LAB-80 --provider linear
+sway-session restore LAB-80
+```
+
+Lifecycle commands accept an exact UUID or an unambiguous exact label:
+
+```sh
+sway-session list
+sway-session archive LAB-80
+sway-session activate LAB-80
+sway-session purge --yes LAB-80
+```
+
+Archive excludes a context from automatic restore while retaining its Herdr
+state. Purge stops and deletes the exact named Herdr session before removing
+the registry entry; without `--yes`, it requires a terminal and the full UUID.
+Use `--json` for stable machine-readable results and diagnostics.
+
+For automatic startup, add both lines to the Sway config:
+
+```conf
+exec_always --no-startup-id sway-title-animator --replace --fps 25
+exec --no-startup-id sway-session restore
+```
+
+The restore line intentionally uses `exec`, not `exec_always`, so reloading the
+Sway config does not launch another restore. Restore also checks Sway and
+already-started typed Alacritty processes before launching, so repeated manual
+calls reuse an existing or pending context window.
 
 ## Choose a Preset
 
