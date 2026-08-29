@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	sessionstate "github.com/marang/sway-title-animator/internal/session"
@@ -44,6 +45,7 @@ type sessionRuntime struct {
 }
 
 type sessionErrorReporter struct {
+	mu          sync.Mutex
 	lastMessage string
 	lastAt      time.Time
 }
@@ -52,6 +54,8 @@ func (reporter *sessionErrorReporter) Report(err error) {
 	if err == nil {
 		return
 	}
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
 	message := err.Error()
 	if message == reporter.lastMessage && time.Since(reporter.lastAt) < 5*time.Second {
 		return

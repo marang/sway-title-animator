@@ -16,13 +16,22 @@ import (
 )
 
 type ProcessStarter interface {
-	Start(string, ...string) error
+	Start(ProcessSpec) error
 }
 
 type ExecProcessStarter struct{}
 
-func (ExecProcessStarter) Start(name string, arguments ...string) error {
-	command := exec.Command(name, arguments...)
+type ProcessSpec struct {
+	Name        string
+	Arguments   []string
+	Environment []string
+}
+
+func (ExecProcessStarter) Start(spec ProcessSpec) error {
+	command := exec.Command(spec.Name, spec.Arguments...)
+	if len(spec.Environment) != 0 {
+		command.Env = append(os.Environ(), spec.Environment...)
+	}
 	if err := command.Start(); err != nil {
 		return err
 	}
@@ -84,7 +93,11 @@ func (launcher AlacrittyHerdrLauncher) Launch(context Context) error {
 	if err != nil {
 		return err
 	}
-	return launcher.Starter.Start(launcher.Alacritty, arguments...)
+	return launcher.Starter.Start(ProcessSpec{
+		Name:        launcher.Alacritty,
+		Arguments:   arguments,
+		Environment: []string{"SWAY_SESSION_CONTEXT_ID=" + string(context.ID)},
+	})
 }
 
 // FindPendingAlacrittyLaunches recognizes not-yet-mapped launches by their

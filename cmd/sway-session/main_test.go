@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marang/sway-title-animator/internal/codexreport"
 	sessionstate "github.com/marang/sway-title-animator/internal/session"
 	"github.com/marang/sway-title-animator/internal/swayipc"
 )
@@ -232,9 +234,13 @@ func TestRestoreLaunchesMissingContextWithTypedArgumentsAndWaitsForMapping(t *te
 		t.Fatalf("expected one launch, got %v", starter.calls)
 	}
 	want := processCall{
-		"/trusted/alacritty", "--class=sway-session." + string(testContextID),
-		"--working-directory=" + registered.Launcher.Cwd, "--title=LAB-80",
-		"-e", "/trusted/herdr", "--session", "lab-80",
+		name: "/trusted/alacritty",
+		arguments: []string{
+			"--class=sway-session." + string(testContextID),
+			"--working-directory=" + registered.Launcher.Cwd, "--title=LAB-80",
+			"-e", "/trusted/herdr", "--session", "lab-80",
+		},
+		environment: []string{"SWAY_SESSION_CONTEXT_ID=" + string(testContextID)},
 	}
 	if !reflect.DeepEqual(starter.calls[0], want) {
 		t.Fatalf("launcher argv differs:\ngot  %q\nwant %q", starter.calls[0], want)
@@ -321,7 +327,7 @@ func TestRestoreDuplicateContextDoesNotPreventIndependentLaunch(t *testing.T) {
 	if code != exitOperation || len(starter.calls) != 1 {
 		t.Fatalf("independent launch did not continue: code=%d starts=%v stderr=%q", code, starter.calls, stderr.String())
 	}
-	if !strings.Contains(strings.Join(starter.calls[0], "\x00"), "lab-81") || !strings.Contains(stderr.String(), "LAB-80") {
+	if !strings.Contains(strings.Join(starter.calls[0].arguments, "\x00"), "lab-81") || !strings.Contains(stderr.String(), "LAB-80") {
 		t.Fatalf("wrong context launched or diagnosed: starts=%v stderr=%q", starter.calls, stderr.String())
 	}
 	var result commandResult
@@ -355,6 +361,37 @@ func TestJSONRestoreFailuresUseOneDiagnosticEnvelope(t *testing.T) {
 	}
 	if len(envelope.Diagnostics) != 1 || envelope.Diagnostics[0].Code != "pane_history" {
 		t.Fatalf("unexpected diagnostics: %+v", envelope.Diagnostics)
+	}
+}
+
+func TestReportCodexSessionUsesOnlyHookBoundary(t *testing.T) {
+	deps := testDependencies(t)
+	called := false
+	deps.reportCodexHook = func(_ context.Context, input io.Reader, getenv func(string) string) error {
+		called = true
+		data, err := io.ReadAll(input)
+		if err != nil || string(data) != `{"hook_event_name":"SessionStart"}` || getenv("PATH") != os.Getenv("PATH") {
+			t.Fatalf("unexpected hook boundary input=%q err=%v", data, err)
+		}
+		return nil
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runWith([]string{"report-codex-session"}, strings.NewReader(`{"hook_event_name":"SessionStart"}`), &stdout, &stderr, deps)
+	if code != exitSuccess || !called || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("Codex report command failed code=%d called=%v stdout=%q stderr=%q", code, called, stdout.String(), stderr.String())
+	}
+}
+
+func TestReportCodexSessionDoesNotFailOutsideManagedHerdr(t *testing.T) {
+	deps := testDependencies(t)
+	deps.reportCodexHook = func(context.Context, io.Reader, func(string) string) error {
+		return codexreport.ErrNotManagedSession
+	}
+	var stderr bytes.Buffer
+	code := runWith([]string{"report-codex-session"}, strings.NewReader(`{}`), io.Discard, &stderr, deps)
+	if code != exitSuccess || stderr.Len() != 0 {
+		t.Fatalf("unmanaged hook should be a silent no-op: code=%d stderr=%q", code, stderr.String())
 	}
 }
 
@@ -425,15 +462,23 @@ func loadTestRegistry(t *testing.T, deps dependencies) sessionstate.Registry {
 	return registry
 }
 
-type processCall []string
+type processCall struct {
+	name        string
+	arguments   []string
+	environment []string
+}
 
 type recordingStarter struct {
 	calls []processCall
 	err   error
 }
 
-func (starter *recordingStarter) Start(name string, arguments ...string) error {
-	starter.calls = append(starter.calls, append(processCall{name}, arguments...))
+func (starter *recordingStarter) Start(spec sessionstate.ProcessSpec) error {
+	starter.calls = append(starter.calls, processCall{
+		name:        spec.Name,
+		arguments:   append([]string(nil), spec.Arguments...),
+		environment: append([]string(nil), spec.Environment...),
+	})
 	return starter.err
 }
 
@@ -487,7 +532,7 @@ type mappingStarter struct {
 	starts atomic.Int32
 }
 
-func (starter *mappingStarter) Start(string, ...string) error {
+func (starter *mappingStarter) Start(sessionstate.ProcessSpec) error {
 	starter.starts.Add(1)
 	starter.mapped.Store(true)
 	return nil

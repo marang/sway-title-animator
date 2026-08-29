@@ -96,6 +96,17 @@ func runLoopWithFPS(socket string, fps float64) int {
 	go subscribe(socket, events, done)
 
 	reporter := &sessionErrorReporter{}
+	codexBroker, err := startCodexReportBroker(reporter.Report)
+	if err != nil {
+		reporter.Report(fmt.Errorf("start secure Codex session reporter: %w", err))
+	}
+	if codexBroker != nil {
+		defer func() {
+			if err := codexBroker.Close(); err != nil {
+				reporter.Report(fmt.Errorf("stop secure Codex session reporter: %w", err))
+			}
+		}()
+	}
 	sessionRuntime, err := newSessionRuntime(control)
 	if err != nil {
 		reporter.Report(err)

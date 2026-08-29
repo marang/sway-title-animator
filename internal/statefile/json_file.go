@@ -61,6 +61,16 @@ func NewJSONFile[T any](directory string, name string, validate func(*T) error) 
 	}
 }
 
+// OpenPrivateDirectory opens a symlink-free owner-only directory and can
+// create missing components. The returned descriptor remains attached to the
+// verified directory if a pathname component is replaced concurrently.
+func OpenPrivateDirectory(path string, create bool) (*os.File, error) {
+	if path == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, errors.New("private directory must be a clean absolute path")
+	}
+	return openStateDirectory(path, create)
+}
+
 // LoadInto replaces target only after a complete strict decode and validation.
 // On any error, target remains the caller's in-memory last known-good value.
 func (file JSONFile[T]) LoadInto(target *T) error {
@@ -79,6 +89,25 @@ func (file JSONFile[T]) LoadInto(target *T) error {
 		return err
 	}
 	defer unlockDirectory(directory)
+	return file.loadIntoAt(directory, target)
+}
+
+// LoadSnapshotInto reads one validated old-or-new view of an atomically
+// replaced document without joining the directory lock. Use it only when a
+// stale snapshot is safe and the caller must not wait behind a long external
+// transaction. The descriptor-relative regular-file checks are unchanged.
+func (file JSONFile[T]) LoadSnapshotInto(target *T) error {
+	if target == nil {
+		return errors.New("state target is nil")
+	}
+	if err := file.validatePath(); err != nil {
+		return err
+	}
+	directory, err := openStateDirectory(file.directory, false)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
 	return file.loadIntoAt(directory, target)
 }
 

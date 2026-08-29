@@ -56,6 +56,42 @@ func TestSaveAndLoadUsePrivateAtomicState(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotDoesNotWaitBehindExternalTransactionLock(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	file := NewJSONFile(root, "state.json", validateTestDocument)
+	want := testDocument{Version: 1, Value: "available during transaction"}
+	if err := file.Save(want); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := openStateDirectory(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer directory.Close()
+	if err := lockDirectory(directory, unix.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer unlockDirectory(directory)
+
+	result := make(chan error, 1)
+	go func() {
+		var got testDocument
+		err := file.LoadSnapshotInto(&got)
+		if err == nil && got != want {
+			err = fmt.Errorf("snapshot mismatch: got %+v want %+v", got, want)
+		}
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("snapshot read waited behind the transaction lock")
+	}
+}
+
 func TestOpenStateDirectorySyncsParentAfterConcurrentCreation(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "state")
 	wantSyncError := errors.New("parent sync failed")

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,19 @@ type recordingRequester struct {
 	commands []string
 	failAt   int
 	failure  error
+}
+
+func TestSessionErrorReporterSerializesConcurrentBrokerFailures(t *testing.T) {
+	reporter := &sessionErrorReporter{lastMessage: "same", lastAt: time.Now()}
+	var wait sync.WaitGroup
+	for range 32 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			reporter.Report(errors.New("same"))
+		}()
+	}
+	wait.Wait()
 }
 
 func (requester *recordingRequester) Request(messageType swayipc.MessageType, payload []byte) (swayipc.Message, error) {

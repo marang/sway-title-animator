@@ -214,6 +214,50 @@ Sway config does not launch another restore. Restore also checks Sway and
 already-started typed Alacritty processes before launching, so repeated manual
 calls reuse an existing or pending context window.
 
+### Secure Codex resume
+
+Codex resume metadata uses the title animator's owner-only runtime broker. The
+Codex hook never opens Herdr state, the Herdr control socket, the outer-session
+registry, or the Sway IPC socket. It sends only the registered context UUID,
+Herdr's current pane identity, and a canonical Codex session UUID; the broker
+maps the context to its fixed named Herdr session and emits exactly
+one mutating method, `pane.report_agent_session`. Before the mutation, the
+broker uses the fixed read-only `pane.process_info` method and `SO_PEERCRED` to
+prove that the reporter descends from the selected pane's shell. Transcript
+paths and original command lines are ignored. Herdr later constructs its typed
+`codex resume <uuid>` operation from that association.
+
+Enable Codex hooks in `~/.codex/config.toml`:
+
+```toml
+[features]
+hooks = true
+```
+
+Merge the `SessionStart` entry from `contrib/codex/hooks.json` into
+`~/.codex/hooks.json`. Do not retain Herdr's stock Codex SessionStart hook: it
+connects directly to the general Herdr socket and defeats this boundary. The
+managed Alacritty launch injects `SWAY_SESSION_CONTEXT_ID`; Herdr supplies
+`HERDR_PANE_ID`, so the hook is a silent no-op in other terminals.
+On the next Codex start, review this exact command in the Hooks prompt and trust
+it; untrusted hooks do not run.
+
+Install and load the matching AppArmor profile:
+
+```sh
+sudo install -m 0644 contrib/apparmor/codex-home-guard /etc/apparmor.d/codex-home-guard
+sudo apparmor_parser -r /etc/apparmor.d/codex-home-guard
+```
+
+The template assumes the default XDG paths under `~/.config` and
+`~/.local/state`; adjust its two state-root rules before loading it when custom
+XDG roots are in use. The policy denies Herdr history and control sockets,
+`sway-session` state, and Sway IPC while allowing only
+`$XDG_RUNTIME_DIR/sway-session/codex-report.sock`. Use
+`scripts/verify-codex-boundary.sh` from the matching Herdr pane for a live
+positive/negative enforcement check after the profile, Herdr, and one
+registered context are active.
+
 ## Choose a Preset
 
 List presets:

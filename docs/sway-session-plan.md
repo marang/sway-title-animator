@@ -339,6 +339,7 @@ sway-session list
 sway-session archive <context>
 sway-session activate <context>
 sway-session purge [--yes] <context>
+sway-session report-codex-session # Codex SessionStart hook only
 ```
 
 Commands accept an exact canonical UUID or an unambiguous exact human label.
@@ -406,6 +407,16 @@ runs as a narrow broker outside the Codex confinement boundary; Codex receives
 access only to that broker's validated reporting endpoint. AppArmor policy and
 negative tests must prove the general Herdr socket and both state roots remain
 inaccessible from Codex while the reporting path works.
+
+The hook also carries Herdr's bounded current-pane identity as routing metadata.
+The broker never accepts a socket path or method from the hook: it resolves the
+context's unique typed launcher from one validated atomic registry snapshot and
+confines the pane identity to that named session's fixed `herdr.sock`. A fixed
+read-only `pane.process_info` request plus the reporter's kernel `SO_PEERCRED`
+PID proves that the reporting process descends from the selected pane before
+the sole mutation is sent. The hook ignores Codex transcript paths and launch
+commands. Herdr's native adapter derives the only resume command, the typed
+`codex resume <validated-uuid>` form, from the saved association.
 
 ## Sway startup
 

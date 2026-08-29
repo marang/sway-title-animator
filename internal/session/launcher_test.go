@@ -24,11 +24,14 @@ func TestAlacrittyHerdrLauncherPassesMetadataWithoutShellEvaluation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if starter.name != "/usr/bin/alacritty" || !reflect.DeepEqual(starter.arguments, wantArguments) {
-		t.Fatalf("unexpected typed launch name=%q arguments=%q", starter.name, starter.arguments)
+	if starter.spec.Name != "/usr/bin/alacritty" || !reflect.DeepEqual(starter.spec.Arguments, wantArguments) {
+		t.Fatalf("unexpected typed launch name=%q arguments=%q", starter.spec.Name, starter.spec.Arguments)
 	}
-	if !slices.Contains(starter.arguments, "--title=--help; $(touch nope)") {
-		t.Fatalf("leading-hyphen title was not encoded as data: %q", starter.arguments)
+	if !slices.Contains(starter.spec.Arguments, "--title=--help; $(touch nope)") {
+		t.Fatalf("leading-hyphen title was not encoded as data: %q", starter.spec.Arguments)
+	}
+	if !reflect.DeepEqual(starter.spec.Environment, []string{"SWAY_SESSION_CONTEXT_ID=" + string(context.ID)}) {
+		t.Fatalf("context identity was not injected as typed environment: %q", starter.spec.Environment)
 	}
 }
 
@@ -109,12 +112,12 @@ func TestObserveManagedWindowsIsolatedKeepsIndependentContexts(t *testing.T) {
 }
 
 type launcherRecordingStarter struct {
-	name      string
-	arguments []string
+	spec ProcessSpec
 }
 
-func (starter *launcherRecordingStarter) Start(name string, arguments ...string) error {
-	starter.name = name
-	starter.arguments = append([]string(nil), arguments...)
+func (starter *launcherRecordingStarter) Start(spec ProcessSpec) error {
+	starter.spec = spec
+	starter.spec.Arguments = append([]string(nil), spec.Arguments...)
+	starter.spec.Environment = append([]string(nil), spec.Environment...)
 	return nil
 }

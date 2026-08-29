@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marang/sway-title-animator/internal/codexreport"
 	"github.com/marang/sway-title-animator/internal/diagnostic"
 	sessionstate "github.com/marang/sway-title-animator/internal/session"
 	"github.com/marang/sway-title-animator/internal/swayipc"
@@ -31,15 +32,16 @@ type commandSpec struct {
 }
 
 var commandSpecs = map[string]commandSpec{
-	"register": {usage: "register --session <name> [options]", summary: "Register a persistent work context"},
-	"restore":  {usage: "restore [--socket <path>] [context]", summary: "Restore active or selected contexts"},
-	"list":     {usage: "list", summary: "List registered contexts"},
-	"archive":  {usage: "archive <context>", summary: "Exclude a context from automatic restore"},
-	"activate": {usage: "activate <context>", summary: "Return an archived context to automatic restore"},
-	"purge":    {usage: "purge [--yes] <context>", summary: "Permanently remove a context and its saved Herdr state"},
+	"register":             {usage: "register --session <name> [options]", summary: "Register a persistent work context"},
+	"restore":              {usage: "restore [--socket <path>] [context]", summary: "Restore active or selected contexts"},
+	"list":                 {usage: "list", summary: "List registered contexts"},
+	"archive":              {usage: "archive <context>", summary: "Exclude a context from automatic restore"},
+	"activate":             {usage: "activate <context>", summary: "Return an archived context to automatic restore"},
+	"purge":                {usage: "purge [--yes] <context>", summary: "Permanently remove a context and its saved Herdr state"},
+	"report-codex-session": {usage: "report-codex-session", summary: "Report a managed Codex SessionStart event to the narrow broker"},
 }
 
-var commandOrder = []string{"register", "restore", "list", "archive", "activate", "purge"}
+var commandOrder = []string{"register", "restore", "list", "archive", "activate", "purge", "report-codex-session"}
 
 type swayRequester interface {
 	Request(swayipc.MessageType, []byte) (swayipc.Message, error)
@@ -61,6 +63,7 @@ type dependencies struct {
 	sleep           func(time.Duration)
 	settleTimeout   time.Duration
 	stdinTerminal   func() bool
+	reportCodexHook func(context.Context, io.Reader, func(string) string) error
 }
 
 func defaultDependencies(stdin io.Reader) dependencies {
@@ -84,6 +87,7 @@ func defaultDependencies(stdin io.Reader) dependencies {
 			file, ok := stdin.(*os.File)
 			return ok && term.IsTerminal(int(file.Fd()))
 		},
+		reportCodexHook: codexreport.ReportCodexHook,
 	}
 }
 
@@ -299,6 +303,21 @@ func executeCommand(ctx context.Context, name string, arguments []string, stdin 
 		return executePurge(ctx, arguments, stdin, stderr, deps)
 	case "restore":
 		return executeRestore(ctx, arguments, deps)
+	case "report-codex-session":
+		if len(arguments) != 0 {
+			return commandResult{}, usageFailure(name, "report-codex-session accepts no arguments")
+		}
+		if deps.reportCodexHook == nil {
+			return commandResult{}, failure("codex_report", "report Codex session", "Codex report dependency is unavailable")
+		}
+		err := deps.reportCodexHook(ctx, stdin, os.Getenv)
+		if errors.Is(err, codexreport.ErrNotManagedSession) {
+			return commandResult{Command: name, Contexts: []sessionstate.Context{}}, nil
+		}
+		if err != nil {
+			return commandResult{}, failure("codex_report", "report Codex session", err.Error())
+		}
+		return commandResult{Command: name, Contexts: []sessionstate.Context{}}, nil
 	default:
 		return commandResult{}, failure("unknown_command", fmt.Sprintf("unknown command %q", name), "")
 	}
