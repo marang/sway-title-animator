@@ -143,7 +143,7 @@ func collectWorkspaces(root *swayipc.TreeNode, includeScratchpad bool) ([]*swayi
 			// Sway exposes hidden scratchpad contents under a synthetic
 			// workspace. Version 1 has no scratchpad restore contract, so a
 			// temporary scratchpad move must not replace the saved workspace.
-			if includeScratchpad || node.Name != "__i3_scratch" {
+			if (includeScratchpad || node.Name != "__i3_scratch") && node.Name != RestoreStagingWorkspace {
 				workspaces = append(workspaces, node)
 			}
 			return nil

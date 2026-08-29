@@ -149,6 +149,47 @@ func PreserveMissingPlacements(previous LayoutSnapshot, captured LayoutSnapshot,
 	return result, nil
 }
 
+// PreserveFailedRestoreWorkspaces keeps the persisted version of a workspace
+// after a best-effort restore failure, provided the same managed contexts are
+// still on that workspace. This prevents the immediate degraded result from
+// replacing the retryable last-good tree. A changed context set is treated as
+// a later user/lifecycle decision and is not quarantined.
+func PreserveFailedRestoreWorkspaces(
+	previous LayoutSnapshot,
+	candidate LayoutSnapshot,
+	failed map[string]struct{},
+) (LayoutSnapshot, map[string]struct{}, error) {
+	if err := previous.Validate(); err != nil {
+		return LayoutSnapshot{}, nil, fmt.Errorf("validate previous layout: %w", err)
+	}
+	result, err := canonicalSnapshot(candidate)
+	if err != nil {
+		return LayoutSnapshot{}, nil, err
+	}
+	previousByName := make(map[string]WorkspaceLayout, len(previous.Workspaces))
+	for _, workspace := range previous.Workspaces {
+		previousByName[workspace.Name] = workspace
+	}
+	preserved := make(map[string]struct{})
+	for index := range result.Workspaces {
+		name := result.Workspaces[index].Name
+		if _, protect := failed[name]; !protect {
+			continue
+		}
+		lastGood, exists := previousByName[name]
+		if !exists || !sameContextSet(workspaceContextIDs(lastGood), workspaceContextIDs(result.Workspaces[index])) {
+			continue
+		}
+		result.Workspaces[index] = lastGood
+		preserved[name] = struct{}{}
+	}
+	result, err = canonicalSnapshot(result)
+	if err != nil {
+		return LayoutSnapshot{}, nil, fmt.Errorf("validate failure-preserved layout: %w", err)
+	}
+	return result, preserved, nil
+}
+
 // SnapshotDebouncer retains an immutable candidate until it has remained the
 // latest semantic state for the configured quiet period.
 type SnapshotDebouncer struct {

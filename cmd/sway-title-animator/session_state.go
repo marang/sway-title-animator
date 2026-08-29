@@ -23,16 +23,24 @@ type swayRequester interface {
 }
 
 type sessionRuntime struct {
-	client          swayRequester
-	root            string
-	persisted       sessionstate.LayoutSnapshot
-	desired         sessionstate.LayoutSnapshot
-	debouncer       *sessionstate.SnapshotDebouncer
-	registryPresent bool
-	startupComplete bool
-	startupDeadline time.Time
-	observeDeadline time.Time
-	shutdown        bool
+	client            swayRequester
+	root              string
+	persisted         sessionstate.LayoutSnapshot
+	desired           sessionstate.LayoutSnapshot
+	debouncer         *sessionstate.SnapshotDebouncer
+	registryPresent   bool
+	restoreProgress   *sessionstate.RestoreProgress
+	restoreEligible   map[sessionstate.ContextID]struct{}
+	restoreExcluded   map[string]struct{}
+	restoreSkipped    map[string]struct{}
+	restoreFailures   map[string]error
+	originalFocusID   int64
+	originalFocusSet  bool
+	originalFocusDone bool
+	startupComplete   bool
+	startupDeadline   time.Time
+	observeDeadline   time.Time
+	shutdown          bool
 }
 
 type sessionErrorReporter struct {
@@ -82,6 +90,10 @@ func newSessionRuntime(client swayRequester) (*sessionRuntime, error) {
 		desired:         previous,
 		debouncer:       debouncer,
 		registryPresent: registryPresent,
+		restoreEligible: make(map[sessionstate.ContextID]struct{}),
+		restoreExcluded: make(map[string]struct{}),
+		restoreSkipped:  make(map[string]struct{}),
+		restoreFailures: make(map[string]error),
 		startupComplete: len(previous.Workspaces) == 0,
 	}, nil
 }
@@ -107,6 +119,10 @@ func (runtime *sessionRuntime) Reconcile(root *Node, now time.Time) (bool, error
 	if !runtime.startupComplete && runtime.startupDeadline.IsZero() {
 		runtime.startupDeadline = now.Add(sessionStartupSettleDelay)
 	}
+	if !runtime.originalFocusSet {
+		runtime.originalFocusID = focusedContainerID(root)
+		runtime.originalFocusSet = true
+	}
 	// Sway does not emit an IPC event for every geometry change (notably
 	// resize). Keep a low-frequency semantic observation active only while a
 	// persistent registry exists so those changes still reach the debouncer.
@@ -117,6 +133,13 @@ func (runtime *sessionRuntime) Reconcile(root *Node, now time.Time) (bool, error
 	}
 	if len(actions) != 0 {
 		for _, action := range actions {
+			// Seeing an unmarked stable application ID proves this is a newly
+			// mapped context for the current startup. Record that fact before
+			// sending the mark command so an ambiguous response cannot make the
+			// subsequent marked observation look like a pre-existing window.
+			if action.Kind == sessionstate.PlacementAddMark {
+				runtime.restoreEligible[action.ContextID] = struct{}{}
+			}
 			if err := runtime.applyPlacementAction(action); err != nil {
 				var unknown *swayipc.CommandOutcomeUnknownError
 				var invalid *swayipc.CommandResponseInvalidError
@@ -138,6 +161,13 @@ func (runtime *sessionRuntime) Reconcile(root *Node, now time.Time) (bool, error
 		if !ready && now.Before(runtime.startupDeadline) {
 			return false, nil
 		}
+		refresh, done, restoreErr := runtime.restoreStartupLayout(root)
+		if refresh || restoreErr != nil {
+			return refresh, restoreErr
+		}
+		if !done {
+			return false, nil
+		}
 		runtime.startupComplete = true
 		runtime.startupDeadline = time.Time{}
 	}
@@ -145,9 +175,177 @@ func (runtime *sessionRuntime) Reconcile(root *Node, now time.Time) (bool, error
 	if err != nil {
 		return false, err
 	}
+	failedWorkspaces := make(map[string]struct{}, len(runtime.restoreFailures))
+	for workspace := range runtime.restoreFailures {
+		if workspace != "" {
+			failedWorkspaces[workspace] = struct{}{}
+		}
+	}
+	stable, preservedFailures, err := sessionstate.PreserveFailedRestoreWorkspaces(
+		runtime.persisted,
+		stable,
+		failedWorkspaces,
+	)
+	if err != nil {
+		return false, err
+	}
+	for workspace := range failedWorkspaces {
+		if _, preserved := preservedFailures[workspace]; !preserved {
+			delete(runtime.restoreFailures, workspace)
+		}
+	}
 	runtime.desired = stable
 	_, err = runtime.debouncer.Observe(stable, now)
 	return false, err
+}
+
+func (runtime *sessionRuntime) restoreStartupLayout(root *Node) (bool, bool, error) {
+	const maximumTransitions = 8
+	registry, available, err := runtime.loadRegistry()
+	if err != nil || !available {
+		return false, false, err
+	}
+	for range maximumTransitions {
+		if runtime.restoreProgress == nil {
+			selection, err := sessionstate.SelectRestoreWorkspace(
+				root,
+				registry,
+				runtime.persisted,
+				runtime.restoreEligible,
+				runtime.restoreExcluded,
+			)
+			if err != nil {
+				return false, false, err
+			}
+			var degradationErrors []error
+			for _, degradation := range selection.Degradations {
+				runtime.restoreExcluded[degradation.Workspace] = struct{}{}
+				degradationErr := fmt.Errorf(
+					"degrade workspace %q restore: %s",
+					degradation.Workspace,
+					degradation.Reason,
+				)
+				runtime.restoreFailures[degradation.Workspace] = degradationErr
+				degradationErrors = append(degradationErrors, degradationErr)
+			}
+			if selection.Progress == nil {
+				if len(degradationErrors) != 0 {
+					return false, false, errors.Join(degradationErrors...)
+				}
+				if !runtime.originalFocusDone && runtime.originalFocusID > 0 {
+					node := findContainerByID(root, runtime.originalFocusID)
+					if node != nil && !node.Focused {
+						action := sessionstate.RestoreAction{
+							Kind:        sessionstate.RestoreFocus,
+							ContainerID: node.ID,
+						}
+						if err := runtime.applyRestoreAction(action); err != nil {
+							var unknown *swayipc.CommandOutcomeUnknownError
+							var invalid *swayipc.CommandResponseInvalidError
+							if errors.As(err, &unknown) || errors.As(err, &invalid) {
+								return true, false, err
+							}
+							runtime.originalFocusDone = true
+							return false, true, fmt.Errorf("restore original focus: %w", err)
+						}
+						return true, false, nil
+					}
+				}
+				runtime.originalFocusDone = true
+				return false, true, nil
+			}
+			runtime.restoreProgress = selection.Progress
+			if len(degradationErrors) != 0 {
+				return false, false, errors.Join(degradationErrors...)
+			}
+		}
+
+		desired, exists := workspaceByName(runtime.persisted, runtime.restoreProgress.Workspace)
+		if !exists {
+			return false, false, fmt.Errorf("restore workspace %q is absent from persisted layout", runtime.restoreProgress.Workspace)
+		}
+		step, err := sessionstate.PlanWorkspaceRestoreStep(
+			root,
+			registry,
+			desired,
+			*runtime.restoreProgress,
+			runtime.restoreSkipped,
+		)
+		if err != nil {
+			if runtime.restoreProgress.Phase == sessionstate.RestoreRollbackOut ||
+				runtime.restoreProgress.Phase == sessionstate.RestoreRollbackIn {
+				workspace := runtime.restoreProgress.Workspace
+				runtime.restoreExcluded[workspace] = struct{}{}
+				runtime.restoreProgress = nil
+				return false, false, fmt.Errorf("plan rollback for workspace %q: %w", workspace, err)
+			}
+			return runtime.beginRestoreRollback(err)
+		}
+		runtime.restoreProgress = &step.Progress
+		if step.Action == nil {
+			if !step.Done {
+				continue
+			}
+			workspace := runtime.restoreProgress.Workspace
+			runtime.restoreExcluded[workspace] = struct{}{}
+			failed := runtime.restoreProgress.Phase == sessionstate.RestoreRollbackIn
+			runtime.restoreProgress = nil
+			if failed {
+				return false, false, runtime.restoreFailures[workspace]
+			}
+			continue
+		}
+
+		action := *step.Action
+		if err := runtime.applyRestoreAction(action); err != nil {
+			var unknown *swayipc.CommandOutcomeUnknownError
+			var invalid *swayipc.CommandResponseInvalidError
+			if errors.As(err, &unknown) || errors.As(err, &invalid) {
+				return true, false, err
+			}
+			if action.Structural {
+				if runtime.restoreProgress.Phase == sessionstate.RestoreRollbackOut ||
+					runtime.restoreProgress.Phase == sessionstate.RestoreRollbackIn {
+					workspace := runtime.restoreProgress.Workspace
+					runtime.restoreExcluded[workspace] = struct{}{}
+					runtime.restoreProgress = nil
+					runtime.restoreFailures[workspace] = err
+					return false, false, fmt.Errorf("rollback workspace %q after restore failure: %w", workspace, err)
+				}
+				return runtime.beginRestoreRollback(err)
+			}
+			runtime.restoreSkipped[action.Key()] = struct{}{}
+			runtime.restoreFailures[action.Workspace] = err
+			return true, false, err
+		}
+		return true, false, nil
+	}
+	// Yield after bounded in-memory transitions. The periodic observation stays
+	// armed, so a startup with many already-converged workspaces continues on a
+	// later event-loop turn without emitting a false failure diagnostic.
+	return false, false, nil
+}
+
+func (runtime *sessionRuntime) beginRestoreRollback(cause error) (bool, bool, error) {
+	if runtime.restoreProgress == nil {
+		return false, false, cause
+	}
+	workspace := runtime.restoreProgress.Workspace
+	runtime.restoreFailures[workspace] = cause
+	runtime.restoreProgress.Phase = sessionstate.RestoreRollbackOut
+	// Rollback has its own bounded budget. Reusing a build budget which was
+	// already exhausted could strand managed windows on the staging workspace.
+	runtime.restoreProgress.Steps = 0
+	return true, false, fmt.Errorf("restore workspace %q: %w", workspace, cause)
+}
+
+func workspaceByName(snapshot sessionstate.LayoutSnapshot, name string) (sessionstate.WorkspaceLayout, bool) {
+	for _, workspace := range snapshot.Workspaces {
+		if workspace.Name == name {
+			return workspace, true
+		}
+	}
+	return sessionstate.WorkspaceLayout{}, false
 }
 
 func (runtime *sessionRuntime) loadRegistry() (sessionstate.Registry, bool, error) {
@@ -180,12 +378,120 @@ func (runtime *sessionRuntime) applyPlacementAction(action sessionstate.Placemen
 	default:
 		return fmt.Errorf("unsupported placement action %q", action.Kind)
 	}
-	message, err := runtime.client.Request(swayipc.RunCommand, []byte(command))
-	if err != nil {
+	if err := runtime.runSwayCommand(command); err != nil {
 		return fmt.Errorf("apply %s for context %q: %w", action.Kind, action.ContextID, err)
 	}
+	return nil
+}
+
+func (runtime *sessionRuntime) applyRestoreAction(action sessionstate.RestoreAction) error {
+	var command string
+	switch action.Kind {
+	case sessionstate.RestoreMoveWorkspace:
+		command = fmt.Sprintf("[con_id=%d] move container to workspace %s", action.ContainerID, quoteSwayString(action.Target))
+	case sessionstate.RestoreSplit:
+		direction := "horizontal"
+		if action.Layout == sessionstate.LayoutSplitVertical {
+			direction = "vertical"
+		}
+		command = fmt.Sprintf("[con_id=%d] split %s", action.ContainerID, direction)
+	case sessionstate.RestoreSetLayout:
+		layout := string(action.Layout)
+		if action.Layout == sessionstate.LayoutStacked {
+			layout = "stacking"
+		}
+		command = fmt.Sprintf("[con_id=%d] layout %s", action.ContainerID, layout)
+	case sessionstate.RestoreAddTemporaryMark:
+		command = fmt.Sprintf("[con_id=%d] mark --add %s", action.ContainerID, quoteSwayString(action.Target))
+	case sessionstate.RestoreRemoveMark:
+		command = fmt.Sprintf("[con_id=%d] unmark %s", action.ContainerID, quoteSwayString(action.Target))
+	case sessionstate.RestoreMoveToMark:
+		command = fmt.Sprintf("[con_id=%d] move container to mark %s", action.ContainerID, quoteSwayString(action.Target))
+	case sessionstate.RestoreSetFloating:
+		value := "disable"
+		if action.Enable {
+			value = "enable"
+		}
+		command = fmt.Sprintf("[con_id=%d] floating %s", action.ContainerID, value)
+	case sessionstate.RestoreSetProportion:
+		command = fmt.Sprintf("[con_id=%d] resize set %s %d ppt", action.ContainerID, action.Axis, action.Amount)
+	case sessionstate.RestoreResizeFloating:
+		command = fmt.Sprintf(
+			"[con_id=%d] resize set %d px %d px",
+			action.ContainerID,
+			action.Geometry.Width,
+			action.Geometry.Height,
+		)
+	case sessionstate.RestoreMoveFloating:
+		command = fmt.Sprintf(
+			"[con_id=%d] move absolute position %d px %d px",
+			action.ContainerID,
+			action.Geometry.X,
+			action.Geometry.Y,
+		)
+	case sessionstate.RestoreSetFullscreen:
+		value := "disable"
+		if action.Fullscreen == sessionstate.FullscreenWorkspace {
+			value = "enable"
+		} else if action.Fullscreen == sessionstate.FullscreenGlobal {
+			value = "enable global"
+		}
+		command = fmt.Sprintf("[con_id=%d] fullscreen %s", action.ContainerID, value)
+	case sessionstate.RestoreFocus:
+		command = fmt.Sprintf("[con_id=%d] focus", action.ContainerID)
+	default:
+		return fmt.Errorf("unsupported restore action %q", action.Kind)
+	}
+	return runtime.runSwayCommand(command)
+}
+
+func (runtime *sessionRuntime) runSwayCommand(command string) error {
+	message, err := runtime.client.Request(swayipc.RunCommand, []byte(command))
+	if err != nil {
+		return fmt.Errorf("run Sway command: %w", err)
+	}
 	if err := swayipc.CheckRunCommandResponse(message); err != nil {
-		return fmt.Errorf("apply %s for context %q: %w", action.Kind, action.ContextID, err)
+		return fmt.Errorf("run Sway command: %w", err)
+	}
+	return nil
+}
+
+func focusedContainerID(root *Node) int64 {
+	if root == nil {
+		return 0
+	}
+	if root.Focused && root.ID > 0 {
+		return root.ID
+	}
+	for _, child := range root.Nodes {
+		if id := focusedContainerID(child); id > 0 {
+			return id
+		}
+	}
+	for _, child := range root.FloatingNodes {
+		if id := focusedContainerID(child); id > 0 {
+			return id
+		}
+	}
+	return 0
+}
+
+func findContainerByID(root *Node, id int64) *Node {
+	if root == nil {
+		return nil
+	}
+	if root.ID == id {
+		return root
+	}
+	for _, child := range root.Nodes {
+		if found := findContainerByID(child, id); found != nil {
+			return found
+		}
+	}
+	for _, child := range root.FloatingNodes {
+		if found := findContainerByID(child, id); found != nil {
+			return found
+		}
 	}
 	return nil
 }
@@ -280,10 +586,14 @@ func (runtime *sessionRuntime) Shutdown() {
 	runtime.shutdown = true
 	runtime.startupDeadline = time.Time{}
 	runtime.observeDeadline = time.Time{}
+	runtime.restoreProgress = nil
 	runtime.debouncer.Cancel()
 }
 
 func reconcilePersistentSession(animator *TitleAnimator, runtime *sessionRuntime, phase int, report func(error)) {
+	// Bound synchronous IPC work per event-loop turn. Long layout restores keep
+	// the periodic observation armed and continue on a later turn; reaching the
+	// bound is expected progress, not a failed stabilization attempt.
 	const maximumObservations = 4
 	if runtime != nil {
 		runtime.ArmObservationRetry(time.Now())
@@ -306,8 +616,5 @@ func reconcilePersistentSession(animator *TitleAnimator, runtime *sessionRuntime
 		if !refresh {
 			return
 		}
-	}
-	if report != nil {
-		report(errors.New("persistent Sway placement did not stabilize after bounded re-observation"))
 	}
 }

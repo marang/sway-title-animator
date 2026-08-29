@@ -230,6 +230,9 @@ func (workspace *WorkspaceLayout) validate(contextIDs map[ContextID]string, glob
 	if len(workspace.Name) > 256 {
 		return errors.New("workspace name must be at most 256 characters")
 	}
+	if workspace.Name == RestoreStagingWorkspace {
+		return fmt.Errorf("workspace name %q is reserved for restore staging", workspace.Name)
+	}
 	localIDs := make(map[ContextID]struct{})
 	fullscreen := fullscreenValidation{global: globalFullscreen}
 	switch workspace.RestoreMode {

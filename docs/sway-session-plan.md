@@ -280,10 +280,22 @@ does not replace its last saved real-workspace placement.
 6. After the workspace's expected managed windows have appeared or a bounded
    settling timeout expires, a pure restore planner translates the saved tree
    into Sway commands.
-7. Commands rebuild parent layouts from the leaves upward, then apply child
-   order, proportions, floating state, fullscreen state, and focus.
-8. A failed command degrades only the affected context or workspace. Other
-   restores continue and the last good snapshot is retained.
+7. For each exact-layout workspace, managed leaves are first moved to a
+   reserved staging workspace. The planner then rebuilds groups top-down using
+   deterministic temporary marks, followed by proportions, floating state and
+   clamped geometry, fullscreen state, and focus. Existing matching groups are
+   reused rather than rebuilt.
+8. Each mutation is acknowledged and followed by a fresh tree observation.
+   Temporary marks and the staging workspace make an interrupted restore
+   discoverable after a daemon restart. Neither is captured as user state.
+9. An explicit structural failure rolls the managed leaves back to their saved
+   workspace in placement-only form and excludes that workspace from the
+   remainder of the startup restore. A presentation-detail failure is reported
+   and skipped, so other details and workspaces can continue. The last good
+   snapshot remains the persistence base throughout reconstruction and is not
+   replaced by the immediate degraded tree while that workspace still contains
+   the same managed-context set. A later context move, addition, or removal
+   releases that quarantine as a new user or lifecycle decision.
 
 Read-only IPC requests may reconnect and retry automatically. A connection
 failure after sending `RUN_COMMAND` has an unknown outcome and is never retried
@@ -292,6 +304,10 @@ state with the desired state, and replans only commands that remain necessary.
 
 The title animator sends `RUN_COMMAND` messages through the existing bounded
 Sway IPC implementation. It does not spawn `swaymsg` or build shell commands.
+Automatic reconstruction applies only to contexts first observed without their
+stable mark during the current startup. A pre-existing marked window is treated
+as the user's current preference. A connection loss while applying the mark
+does not lose this new-window classification.
 
 ### Best-effort compatibility
 
@@ -300,6 +316,11 @@ structure but does not provide released `append_layout` support. The first
 implementation therefore reconstructs layouts with normal runtime commands.
 It must report any detail it cannot reproduce rather than claiming an exact
 restore.
+
+Runtime `split` commands cannot reliably recreate a distinct layout parent
+which contains only one child. A saved workspace requiring such a singleton
+group is therefore reported and kept at workspace placement only; an already
+matching live singleton group is left untouched.
 
 If a future stable Sway release adds declarative layout restore, that support
 can become a new planner backend without changing context identity or the

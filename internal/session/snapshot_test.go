@@ -208,6 +208,44 @@ func TestPreserveMissingPlacementsDropsUnregisteredContext(t *testing.T) {
 	}
 }
 
+func TestPreserveFailedRestoreWorkspacesKeepsLastGoodTree(t *testing.T) {
+	previous := twoChildLayout(testContextID, secondContextID)
+	candidate := placementSnapshot("2", testContextID, secondContextID)
+	result, preserved, err := PreserveFailedRestoreWorkspaces(
+		previous,
+		candidate,
+		map[string]struct{}{"2": {}},
+	)
+	if err != nil {
+		t.Fatalf("preserve failed restore: %v", err)
+	}
+	if _, exists := preserved["2"]; !exists {
+		t.Fatal("failed workspace was not reported as preserved")
+	}
+	if !reflect.DeepEqual(result, previous) {
+		t.Fatalf("degraded restore replaced the last-good tree: %+v", result)
+	}
+}
+
+func TestPreserveFailedRestoreWorkspacesReleasesChangedContextSet(t *testing.T) {
+	previous := twoChildLayout(testContextID, secondContextID)
+	candidate := placementSnapshot("2", testContextID)
+	result, preserved, err := PreserveFailedRestoreWorkspaces(
+		previous,
+		candidate,
+		map[string]struct{}{"2": {}},
+	)
+	if err != nil {
+		t.Fatalf("release changed failed restore: %v", err)
+	}
+	if _, exists := preserved["2"]; exists {
+		t.Fatal("changed context set remained quarantined")
+	}
+	if !reflect.DeepEqual(result, candidate) {
+		t.Fatalf("later context-set change was discarded: %+v", result)
+	}
+}
+
 func placementSnapshot(workspace string, ids ...ContextID) LayoutSnapshot {
 	return LayoutSnapshot{
 		Version: LayoutSchemaVersion,
