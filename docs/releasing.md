@@ -11,14 +11,16 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-GoReleaser builds Linux archives for `amd64` and `arm64`, plus Linux `deb` and
-`rpm` packages.
+GoReleaser builds `sway-title-animator` and `sway-session` in Linux archives for
+`amd64` and `arm64`, plus Linux `deb` and `rpm` packages. The archives and
+packages also carry the Sway, Herdr, Codex-hook, and AppArmor integration
+templates.
 
 ## AUR
 
-The repository includes a source `PKGBUILD` for publishing `sway-title-animator`
-to the AUR. The AUR workflow updates `pkgver` and `sha256sums`, generates
-`.SRCINFO`, and pushes to:
+The repository includes a source `PKGBUILD` for publishing both binaries and
+their integration templates in the `sway-title-animator` AUR package. The AUR
+workflow updates `pkgver` and `sha256sums`, generates `.SRCINFO`, and pushes to:
 
 ```text
 ssh://aur@aur.archlinux.org/sway-title-animator.git

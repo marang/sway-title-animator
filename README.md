@@ -144,6 +144,10 @@ This installs:
 
 Make sure `~/.local/bin` is in your `PATH`.
 
+Release archives and distribution packages also contain both programs. Packaged
+copies of the Sway, Herdr, Codex-hook, and AppArmor integration templates live
+under `/usr/share/doc/sway-title-animator`.
+
 ## Sway Setup
 
 Add this to your Sway config:
