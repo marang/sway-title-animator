@@ -66,6 +66,82 @@ func TestCaptureLayoutPreservesNestedTilingAndFloatingState(t *testing.T) {
 	}
 }
 
+func TestCaptureFullscreenPreservesUnderlyingSplitProportion(t *testing.T) {
+	quarter := 0.25
+	fullscreenPercent := 1.0
+	fullscreen := managedTreeLeaf(t, 12, secondContextID, &fullscreenPercent, true)
+	fullscreen.FullscreenMode = 1
+	root := treeWithWorkspaces(&swayipc.TreeNode{
+		Name:   "2: work",
+		Type:   "workspace",
+		Layout: "splith",
+		Nodes: []*swayipc.TreeNode{
+			managedTreeLeaf(t, 11, testContextID, &quarter, false),
+			fullscreen,
+			managedTreeLeaf(t, 13, thirdContextID, &quarter, false),
+			managedTreeLeaf(t, 14, ContextID("6ba7b812-9dad-11d1-80b4-00c04fd430c8"), &quarter, false),
+		},
+	})
+
+	snapshot, err := CaptureLayout(root, registryWithContexts(
+		testContextID,
+		secondContextID,
+		thirdContextID,
+		ContextID("6ba7b812-9dad-11d1-80b4-00c04fd430c8"),
+	))
+	if err != nil {
+		t.Fatalf("capture fullscreen layout: %v", err)
+	}
+	children := snapshot.Workspaces[0].Tiling.Children
+	if children[1].Proportion != quarter || children[1].Fullscreen != FullscreenWorkspace {
+		t.Fatalf("fullscreen presentation percent replaced underlying split share: %+v", children[1])
+	}
+}
+
+func TestCaptureFullscreenOmitsPresentationPercentWhenSiblingShareIsUnknown(t *testing.T) {
+	fullscreenPercent := 1.0
+	fullscreen := managedTreeLeaf(t, 11, testContextID, &fullscreenPercent, true)
+	fullscreen.FullscreenMode = 1
+	root := treeWithWorkspaces(&swayipc.TreeNode{
+		Name:   "2: work",
+		Type:   "workspace",
+		Layout: "splith",
+		Nodes: []*swayipc.TreeNode{
+			fullscreen,
+			managedTreeLeaf(t, 12, secondContextID, nil, false),
+		},
+	})
+
+	snapshot, err := CaptureLayout(root, registryWithContexts(testContextID, secondContextID))
+	if err != nil {
+		t.Fatalf("capture fullscreen layout: %v", err)
+	}
+	if got := snapshot.Workspaces[0].Tiling.Children[0].Proportion; got != 0 {
+		t.Fatalf("captured fullscreen presentation percent without sibling evidence: %v", got)
+	}
+}
+
+func TestCaptureFloatingGeometryIncludesDecoration(t *testing.T) {
+	leaf := managedTreeLeaf(t, 11, testContextID, nil, true)
+	leaf.Rect = swayipc.Rect{X: 100, Y: 147, Width: 420, Height: 233}
+	leaf.DecoRect = swayipc.Rect{X: 100, Y: 120, Width: 420, Height: 27}
+	root := treeWithWorkspaces(&swayipc.TreeNode{
+		Name:          "2: work",
+		Type:          "workspace",
+		Layout:        "splith",
+		FloatingNodes: []*swayipc.TreeNode{leaf},
+	})
+
+	snapshot, err := CaptureLayout(root, registryWithContexts(testContextID))
+	if err != nil {
+		t.Fatalf("capture decorated floating geometry: %v", err)
+	}
+	want := &Geometry{X: 100, Y: 120, Width: 420, Height: 260}
+	if got := snapshot.Workspaces[0].Floating[0].Geometry; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected outer floating geometry: got %+v want %+v", got, want)
+	}
+}
+
 func TestCaptureLayoutUsesFocusOrderForInactiveWorkspace(t *testing.T) {
 	root := treeWithWorkspaces(&swayipc.TreeNode{
 		Name:   "2: inactive",

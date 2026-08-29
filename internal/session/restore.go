@@ -419,7 +419,8 @@ func PlanWorkspaceRestoreStep(
 				return restoreActionStep(action, next), nil
 			}
 			geometry := clampGeometry(*floating.Geometry, workspaceNode.Rect)
-			if !rectSizeClose(node.Rect, geometry) {
+			actualGeometry := outerContainerRect(node)
+			if !rectSizeClose(actualGeometry, geometry) {
 				action := RestoreAction{
 					Kind:        RestoreResizeFloating,
 					Workspace:   desired.Name,
@@ -435,7 +436,7 @@ func PlanWorkspaceRestoreStep(
 					return restoreActionStep(action, next), nil
 				}
 			}
-			if !rectPositionClose(node.Rect, geometry) {
+			if !rectPositionClose(actualGeometry, geometry) {
 				action := RestoreAction{
 					Kind:        RestoreMoveFloating,
 					Workspace:   desired.Name,
@@ -959,16 +960,28 @@ func planProportions(
 		return nil, nil
 	}
 	if desired.Layout == LayoutSplitHorizontal || desired.Layout == LayoutSplitVertical {
+		parent, err := observation.nodeForDesired(workspace, desired, path)
+		if err != nil {
+			return nil, err
+		}
+		proportionOverrides := capturedChildProportions(parent.Layout, parent.Nodes)
 		for index := 0; index+1 < len(desired.Children); index++ {
 			child := desired.Children[index]
 			if child.Proportion <= 0 {
 				continue
 			}
-			node, err := observation.nodeForDesired(workspace, child, fmt.Sprintf("%s_%d", path, index))
-			if err != nil {
-				return nil, err
+			node := observation.directChildContaining(parent, firstLayoutContextID(child))
+			if node == nil {
+				return nil, fmt.Errorf("restore group %q has no direct proportion child for context %q", path, firstLayoutContextID(child))
 			}
-			if node.Percent != nil && math.Abs(*node.Percent-child.Proportion) <= proportionTolerance {
+			observedProportion := node.Percent
+			for childIndex, candidate := range parent.Nodes {
+				if candidate == node && proportionOverrides[childIndex] != nil {
+					observedProportion = proportionOverrides[childIndex]
+					break
+				}
+			}
+			if observedProportion != nil && math.Abs(*observedProportion-child.Proportion) <= proportionTolerance {
 				continue
 			}
 			axis := "width"

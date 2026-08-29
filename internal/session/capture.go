@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -179,8 +180,9 @@ func captureWorkspace(workspace *swayipc.TreeNode, registered map[ContextID]stru
 	tilingLayouts := make([]LayoutNode, 0, len(workspace.Nodes))
 	tilingManaged := 0
 	tilingHasUnmanaged := false
+	tilingProportions := capturedChildProportions(workspace.Layout, workspace.Nodes)
 	for index, child := range workspace.Nodes {
-		captured, err := captureNode(child, registered, false)
+		captured, err := captureNode(child, registered, false, tilingProportions[index])
 		if err != nil {
 			return WorkspaceLayout{}, false, fmt.Errorf("tiling[%d]: %w", index, err)
 		}
@@ -197,7 +199,7 @@ func captureWorkspace(workspace *swayipc.TreeNode, registered map[ContextID]stru
 
 	floatingLayouts := make([]LayoutNode, 0, len(workspace.FloatingNodes))
 	for index, child := range workspace.FloatingNodes {
-		captured, err := captureNode(child, registered, true)
+		captured, err := captureNode(child, registered, true, nil)
 		if err != nil {
 			return WorkspaceLayout{}, false, fmt.Errorf("floating[%d]: %w", index, err)
 		}
@@ -246,7 +248,7 @@ func captureWorkspace(workspace *swayipc.TreeNode, registered map[ContextID]stru
 	}, true, nil
 }
 
-func captureNode(node *swayipc.TreeNode, registered map[ContextID]struct{}, floatingRoot bool) (nodeCapture, error) {
+func captureNode(node *swayipc.TreeNode, registered map[ContextID]struct{}, floatingRoot bool, proportionOverride *float64) (nodeCapture, error) {
 	if node == nil {
 		return nodeCapture{}, errors.New("layout node is nil")
 	}
@@ -269,7 +271,7 @@ func captureNode(node *swayipc.TreeNode, registered map[ContextID]struct{}, floa
 		}
 		layout := LayoutNode{
 			ContextID:  contextIDPointerValue(identity),
-			Proportion: capturedProportion(node.Percent, floatingRoot),
+			Proportion: capturedProportion(node.Percent, proportionOverride, floatingRoot),
 		}
 		fullscreen, err := captureFullscreen(node.FullscreenMode)
 		if err != nil {
@@ -277,7 +279,7 @@ func captureNode(node *swayipc.TreeNode, registered map[ContextID]struct{}, floa
 		}
 		layout.Fullscreen = fullscreen
 		if floatingRoot {
-			layout.Geometry = capturedGeometry(node.Rect)
+			layout.Geometry = capturedGeometry(outerContainerRect(node))
 		}
 		return nodeCapture{
 			layout:        &layout,
@@ -290,8 +292,9 @@ func captureNode(node *swayipc.TreeNode, registered map[ContextID]struct{}, floa
 	}
 	children := make([]LayoutNode, 0, len(node.Nodes))
 	captured := nodeCapture{}
+	childProportions := capturedChildProportions(node.Layout, node.Nodes)
 	for index, child := range node.Nodes {
-		result, err := captureNode(child, registered, false)
+		result, err := captureNode(child, registered, false, childProportions[index])
 		if err != nil {
 			return nodeCapture{}, fmt.Errorf("children[%d]: %w", index, err)
 		}
@@ -320,11 +323,11 @@ func captureNode(node *swayipc.TreeNode, registered map[ContextID]struct{}, floa
 	layout := LayoutNode{
 		Layout:     layoutKind,
 		Children:   children,
-		Proportion: capturedProportion(node.Percent, floatingRoot),
+		Proportion: capturedProportion(node.Percent, proportionOverride, floatingRoot),
 		Fullscreen: fullscreen,
 	}
 	if floatingRoot {
-		layout.Geometry = capturedGeometry(node.Rect)
+		layout.Geometry = capturedGeometry(outerContainerRect(node))
 	}
 	captured.layout = &layout
 	return captured, nil
@@ -559,15 +562,91 @@ func captureFullscreen(value int) (FullscreenMode, error) {
 	}
 }
 
-func capturedProportion(value *float64, floatingRoot bool) float64 {
+func capturedProportion(value *float64, override *float64, floatingRoot bool) float64 {
 	if value == nil || floatingRoot {
 		return 0
+	}
+	if override != nil {
+		return *override
 	}
 	return *value
 }
 
+// Sway reports a fullscreen tiled child with percent=1 while retaining the
+// underlying percentages on its siblings. Reconstruct that child's hidden
+// split share when all siblings provide enough information; otherwise omit
+// the proportion instead of persisting the fullscreen presentation value.
+func capturedChildProportions(layout string, children []*swayipc.TreeNode) []*float64 {
+	overrides := make([]*float64, len(children))
+	if layout != string(LayoutSplitHorizontal) && layout != string(LayoutSplitVertical) || len(children) < 2 {
+		return overrides
+	}
+	fullscreenIndex := -1
+	for index, child := range children {
+		if treeNodeHasFullscreen(child) {
+			if fullscreenIndex >= 0 {
+				return overrides
+			}
+			fullscreenIndex = index
+		}
+	}
+	if fullscreenIndex < 0 {
+		return overrides
+	}
+	omitFullscreen := func() []*float64 {
+		zero := 0.0
+		overrides[fullscreenIndex] = &zero
+		return overrides
+	}
+	sum := 0.0
+	for _, child := range children {
+		if child == nil || child.Percent == nil || math.IsNaN(*child.Percent) || math.IsInf(*child.Percent, 0) || *child.Percent < 0 || *child.Percent > 1 {
+			return omitFullscreen()
+		}
+		sum += *child.Percent
+	}
+	if sum <= 1+1e-9 {
+		return overrides
+	}
+	remaining := 1 - (sum - *children[fullscreenIndex].Percent)
+	if remaining <= 0 || remaining > 1 {
+		return omitFullscreen()
+	}
+	overrides[fullscreenIndex] = &remaining
+	return overrides
+}
+
+func treeNodeHasFullscreen(node *swayipc.TreeNode) bool {
+	if node == nil {
+		return false
+	}
+	if node.FullscreenMode != 0 {
+		return true
+	}
+	for _, child := range node.Nodes {
+		if treeNodeHasFullscreen(child) {
+			return true
+		}
+	}
+	return false
+}
+
 func capturedGeometry(rect swayipc.Rect) *Geometry {
 	return &Geometry{X: rect.X, Y: rect.Y, Width: rect.Width, Height: rect.Height}
+}
+
+func outerContainerRect(node *swayipc.TreeNode) swayipc.Rect {
+	if node == nil || node.DecoRect.Width <= 0 || node.DecoRect.Height <= 0 {
+		if node == nil {
+			return swayipc.Rect{}
+		}
+		return node.Rect
+	}
+	left := min(node.Rect.X, node.DecoRect.X)
+	top := min(node.Rect.Y, node.DecoRect.Y)
+	right := max(node.Rect.X+node.Rect.Width, node.DecoRect.X+node.DecoRect.Width)
+	bottom := max(node.Rect.Y+node.Rect.Height, node.DecoRect.Y+node.DecoRect.Height)
+	return swayipc.Rect{X: left, Y: top, Width: right - left, Height: bottom - top}
 }
 
 func contextIDPointerValue(id ContextID) *ContextID {

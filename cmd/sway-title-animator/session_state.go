@@ -24,24 +24,25 @@ type swayRequester interface {
 }
 
 type sessionRuntime struct {
-	client            swayRequester
-	root              string
-	persisted         sessionstate.LayoutSnapshot
-	desired           sessionstate.LayoutSnapshot
-	debouncer         *sessionstate.SnapshotDebouncer
-	registryPresent   bool
-	restoreProgress   *sessionstate.RestoreProgress
-	restoreEligible   map[sessionstate.ContextID]struct{}
-	restoreExcluded   map[string]struct{}
-	restoreSkipped    map[string]struct{}
-	restoreFailures   map[string]error
-	originalFocusID   int64
-	originalFocusSet  bool
-	originalFocusDone bool
-	startupComplete   bool
-	startupDeadline   time.Time
-	observeDeadline   time.Time
-	shutdown          bool
+	client             swayRequester
+	root               string
+	persisted          sessionstate.LayoutSnapshot
+	desired            sessionstate.LayoutSnapshot
+	debouncer          *sessionstate.SnapshotDebouncer
+	registryPresent    bool
+	restoreProgress    *sessionstate.RestoreProgress
+	restoreEligible    map[sessionstate.ContextID]struct{}
+	restoreExcluded    map[string]struct{}
+	restoreSkipped     map[string]struct{}
+	restoreFailures    map[string]error
+	lateRestorePending bool
+	originalFocusID    int64
+	originalFocusSet   bool
+	originalFocusDone  bool
+	startupComplete    bool
+	startupDeadline    time.Time
+	observeDeadline    time.Time
+	shutdown           bool
 }
 
 type sessionErrorReporter struct {
@@ -143,6 +144,9 @@ func (runtime *sessionRuntime) Reconcile(root *Node, now time.Time) (bool, error
 			// subsequent marked observation look like a pre-existing window.
 			if action.Kind == sessionstate.PlacementAddMark {
 				runtime.restoreEligible[action.ContextID] = struct{}{}
+				if runtime.startupComplete {
+					runtime.rearmLateRestore(action.ContextID)
+				}
 			}
 			if err := runtime.applyPlacementAction(action); err != nil {
 				var unknown *swayipc.CommandOutcomeUnknownError
@@ -174,6 +178,15 @@ func (runtime *sessionRuntime) Reconcile(root *Node, now time.Time) (bool, error
 		}
 		runtime.startupComplete = true
 		runtime.startupDeadline = time.Time{}
+	} else if runtime.lateRestorePending {
+		refresh, done, restoreErr := runtime.restoreStartupLayout(root)
+		if refresh || restoreErr != nil {
+			return refresh, restoreErr
+		}
+		if !done {
+			return false, nil
+		}
+		runtime.lateRestorePending = false
 	}
 	stable, err := sessionstate.PreserveMissingPlacements(runtime.persisted, captured, registry)
 	if err != nil {
@@ -343,6 +356,47 @@ func (runtime *sessionRuntime) beginRestoreRollback(cause error) (bool, bool, er
 	return true, false, fmt.Errorf("restore workspace %q: %w", workspace, cause)
 }
 
+func (runtime *sessionRuntime) rearmLateRestore(id sessionstate.ContextID) {
+	runtime.lateRestorePending = true
+	if workspace, exists := snapshotContextWorkspace(runtime.desired, id); exists {
+		delete(runtime.restoreExcluded, workspace)
+	}
+}
+
+func snapshotContextWorkspace(snapshot sessionstate.LayoutSnapshot, id sessionstate.ContextID) (string, bool) {
+	var contains func(*sessionstate.LayoutNode) bool
+	contains = func(node *sessionstate.LayoutNode) bool {
+		if node == nil {
+			return false
+		}
+		if node.ContextID != nil && *node.ContextID == id {
+			return true
+		}
+		for index := range node.Children {
+			if contains(&node.Children[index]) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, workspace := range snapshot.Workspaces {
+		for _, contextID := range workspace.PlacementContexts {
+			if contextID == id {
+				return workspace.Name, true
+			}
+		}
+		if contains(workspace.Tiling) {
+			return workspace.Name, true
+		}
+		for index := range workspace.Floating {
+			if contains(&workspace.Floating[index]) {
+				return workspace.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 func workspaceByName(snapshot sessionstate.LayoutSnapshot, name string) (sessionstate.WorkspaceLayout, bool) {
 	for _, workspace := range snapshot.Workspaces {
 		if workspace.Name == name {
@@ -464,7 +518,9 @@ func focusedContainerID(root *Node) int64 {
 	if root == nil {
 		return 0
 	}
-	if root.Focused && root.ID > 0 {
+	if root.Focused && root.ID > 0 &&
+		(root.Type == "con" || root.Type == "floating_con") &&
+		len(root.Nodes) == 0 && len(root.FloatingNodes) == 0 {
 		return root.ID
 	}
 	for _, child := range root.Nodes {

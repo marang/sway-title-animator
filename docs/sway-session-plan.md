@@ -1,6 +1,6 @@
 # Persistent Sway Work Sessions
 
-Status: Planned
+Status: Implemented on the LAB-80 feature branch; pending merge
 
 Tracking issue: [LAB-80](https://linear.app/riotbox/issue/LAB-80/add-persistent-sway-work-session-restoration)
 

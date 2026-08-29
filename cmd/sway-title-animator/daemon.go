@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -21,6 +22,10 @@ func subscribe(socket string, events chan<- swayipc.Event, done <-chan struct{})
 
 		conn, err := swayipc.Dial(socket)
 		if err != nil {
+			if swayEndpointGone(socket) {
+				emitSwayShutdown(events, done)
+				return
+			}
 			if waitForDone(done, time.Second) {
 				return
 			}
@@ -42,6 +47,10 @@ func subscribe(socket string, events chan<- swayipc.Event, done <-chan struct{})
 			message, err := conn.Read()
 			if err != nil {
 				_ = conn.Close()
+				if swayEndpointGone(socket) {
+					emitSwayShutdown(events, done)
+					return
+				}
 				break
 			}
 			event, err := swayipc.DecodeEvent(message)
@@ -65,6 +74,18 @@ func subscribe(socket string, events chan<- swayipc.Event, done <-chan struct{})
 		if waitForDone(done, time.Second) {
 			return
 		}
+	}
+}
+
+func swayEndpointGone(socket string) bool {
+	_, err := os.Lstat(socket)
+	return errors.Is(err, os.ErrNotExist)
+}
+
+func emitSwayShutdown(events chan<- swayipc.Event, done <-chan struct{}) {
+	select {
+	case events <- swayipc.Event{Type: swayipc.EventShutdown, Change: "endpoint-gone"}:
+	case <-done:
 	}
 }
 

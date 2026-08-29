@@ -33,6 +33,23 @@ func TestSessionErrorReporterSerializesConcurrentBrokerFailures(t *testing.T) {
 	wait.Wait()
 }
 
+func TestFocusedContainerIDSelectsWindowLeafInsteadOfWorkspace(t *testing.T) {
+	leaf := &Node{ID: 42, Type: "con", Focused: true}
+	workspace := &Node{ID: 3, Type: "workspace", Focused: true, Nodes: []*Node{leaf}}
+	root := &Node{ID: 1, Type: "root", Nodes: []*Node{{ID: 2, Type: "output", Nodes: []*Node{workspace}}}}
+	if got := focusedContainerID(root); got != leaf.ID {
+		t.Fatalf("focused container ID = %d, want window leaf %d", got, leaf.ID)
+	}
+}
+
+func TestFocusedContainerIDIgnoresEmptyFocusedWorkspace(t *testing.T) {
+	root := daemonTree("1")
+	root.Nodes[0].Nodes[0].Focused = true
+	if got := focusedContainerID(root); got != 0 {
+		t.Fatalf("empty workspace produced restorable focus ID %d", got)
+	}
+}
+
 func (requester *recordingRequester) Request(messageType swayipc.MessageType, payload []byte) (swayipc.Message, error) {
 	if messageType != swayipc.RunCommand {
 		return swayipc.Message{}, errors.New("unexpected request type")
@@ -299,6 +316,61 @@ func TestSessionRuntimeSettlingTimeoutUnblocksCompleteWorkspaces(t *testing.T) {
 	}
 	if _, scheduled := runtime.debouncer.Deadline(); !scheduled {
 		t.Fatal("safe post-timeout snapshot was not scheduled")
+	}
+}
+
+func TestSessionRuntimeRestoresContextWhichMapsAfterStartupTimeout(t *testing.T) {
+	secondID := sessionstate.ContextID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	stateHome := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	root := filepath.Join(stateHome, "sway-session")
+	if err := sessionstate.RegistryFile(root).Save(sessionRegistryIDs(testManagedContextID, secondID)); err != nil {
+		t.Fatalf("save registry: %v", err)
+	}
+	previous := exactDaemonSnapshot("2", testManagedContextID, secondID)
+	previous.Workspaces[0].Tiling.Layout = sessionstate.LayoutStacked
+	if err := sessionstate.LayoutFile(root).Save(previous); err != nil {
+		t.Fatalf("save layout: %v", err)
+	}
+	requester := &recordingRequester{}
+	runtime, err := newSessionRuntime(requester)
+	if err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	start := time.Unix(375, 0)
+	firstAppID, _ := testManagedContextID.AppID()
+	firstUnmarked := &Node{ID: 41, Name: "first", Type: "con", AppID: &firstAppID}
+	if refresh, err := runtime.Reconcile(daemonTree("2", firstUnmarked), start); err != nil || !refresh {
+		t.Fatalf("mark first startup window: refresh=%v err=%v", refresh, err)
+	}
+	firstMarked := managedDaemonLeaf(t, 41, testManagedContextID)
+	if refresh, err := runtime.Reconcile(daemonTree("2", firstMarked), start.Add(sessionStartupSettleDelay)); err != nil || refresh {
+		t.Fatalf("finish partial startup: refresh=%v err=%v", refresh, err)
+	}
+	if !runtime.startupComplete {
+		t.Fatal("partial startup did not finish at its settling deadline")
+	}
+	runtime.restoreExcluded["2"] = struct{}{}
+
+	secondAppID, _ := secondID.AppID()
+	secondUnmarked := &Node{ID: 42, Name: "second", Type: "con", AppID: &secondAppID}
+	if refresh, err := runtime.Reconcile(daemonTree("2", firstMarked, secondUnmarked), start.Add(11*time.Second)); err != nil || !refresh {
+		t.Fatalf("mark late startup window: refresh=%v err=%v", refresh, err)
+	}
+	if !runtime.lateRestorePending {
+		t.Fatal("late startup window did not re-arm layout restoration")
+	}
+	if _, excluded := runtime.restoreExcluded["2"]; excluded {
+		t.Fatal("late startup window left its workspace excluded from restoration")
+	}
+	secondMarked := managedDaemonLeaf(t, 42, secondID)
+	refresh, err := runtime.Reconcile(daemonTree("2", firstMarked, secondMarked), start.Add(12*time.Second))
+	if err != nil || !refresh {
+		t.Fatalf("restore late complete workspace: refresh=%v err=%v", refresh, err)
+	}
+	last := requester.commands[len(requester.commands)-1]
+	if !strings.Contains(last, "move container to workspace \""+sessionstate.RestoreStagingWorkspace+"\"") {
+		t.Fatalf("late complete workspace did not begin structural restore: %v", requester.commands)
 	}
 }
 

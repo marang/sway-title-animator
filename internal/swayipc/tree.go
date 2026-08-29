@@ -48,6 +48,7 @@ type TreeNode struct {
 	Marks            []string         `json:"marks"`
 	Focus            []int64          `json:"focus"`
 	Rect             Rect             `json:"rect"`
+	DecoRect         Rect             `json:"deco_rect"`
 	WindowProperties WindowProperties `json:"window_properties"`
 	Nodes            []*TreeNode      `json:"nodes"`
 	FloatingNodes    []*TreeNode      `json:"floating_nodes"`

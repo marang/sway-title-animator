@@ -623,6 +623,65 @@ func TestPlanWorkspaceRestoreMovesFloatingPositionAndRestoresFocus(t *testing.T)
 	}
 }
 
+func TestPlanWorkspaceRestoreAcceptsDecoratedOuterFloatingGeometry(t *testing.T) {
+	desired := WorkspaceLayout{
+		Name:        "2",
+		RestoreMode: WorkspaceRestoreLayout,
+		Floating: []LayoutNode{{
+			ContextID: contextIDPointer(testContextID),
+			Geometry:  &Geometry{X: 100, Y: 120, Width: 420, Height: 260},
+		}},
+		FocusedContext: contextIDPointer(testContextID),
+	}
+	leaf := managedTreeLeaf(t, 11, testContextID, nil, true)
+	leaf.Type = "floating_con"
+	leaf.Rect = swayipc.Rect{X: 100, Y: 147, Width: 420, Height: 233}
+	leaf.DecoRect = swayipc.Rect{X: 100, Y: 120, Width: 420, Height: 27}
+	workspace := restoreWorkspace("2", "splith")
+	workspace.Rect = swayipc.Rect{Width: 1920, Height: 1080}
+	workspace.FloatingNodes = []*swayipc.TreeNode{leaf}
+
+	step, err := PlanWorkspaceRestoreStep(
+		restoreTree(workspace),
+		registryWithContexts(testContextID),
+		desired,
+		RestoreProgress{Workspace: "2", Phase: RestoreBuild},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("plan decorated floating geometry: %v", err)
+	}
+	if !step.Done || step.Action != nil {
+		t.Fatalf("already converged decorated geometry planned another action: %+v", step)
+	}
+}
+
+func TestPlanWorkspaceRestoreUsesUnderlyingFullscreenProportion(t *testing.T) {
+	desired := exactWorkspace("2", LayoutSplitHorizontal, testContextID, secondContextID)
+	desired.Tiling.Children[0].Proportion = 0.5
+	desired.Tiling.Children[0].Fullscreen = FullscreenWorkspace
+	desired.Tiling.Children[1].Proportion = 0.5
+	half := 0.5
+	fullscreenPercent := 1.0
+	first := managedTreeLeaf(t, 11, testContextID, &fullscreenPercent, true)
+	first.FullscreenMode = 1
+	second := managedTreeLeaf(t, 12, secondContextID, &half, false)
+
+	step, err := PlanWorkspaceRestoreStep(
+		restoreTree(restoreWorkspace("2", "splith", first, second)),
+		registryWithContexts(testContextID, secondContextID),
+		desired,
+		RestoreProgress{Workspace: "2", Phase: RestoreBuild},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("plan fullscreen proportions: %v", err)
+	}
+	if !step.Done || step.Action != nil {
+		t.Fatalf("fullscreen presentation percent prevented convergence: %+v", step)
+	}
+}
+
 func TestPlanWorkspaceRestoreRollbackAndStepBound(t *testing.T) {
 	desired := exactWorkspace("2", LayoutSplitHorizontal, testContextID, secondContextID)
 	root := restoreTree(
