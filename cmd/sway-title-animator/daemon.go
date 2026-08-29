@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -12,7 +11,7 @@ import (
 	"github.com/marang/sway-title-animator/internal/swayipc"
 )
 
-func subscribe(socket string, events chan<- struct{}, shutdown chan<- struct{}, done <-chan struct{}) {
+func subscribe(socket string, events chan<- swayipc.Event, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -22,12 +21,20 @@ func subscribe(socket string, events chan<- struct{}, shutdown chan<- struct{}, 
 
 		conn, err := swayipc.Dial(socket)
 		if err != nil {
-			time.Sleep(time.Second)
+			if waitForDone(done, time.Second) {
+				return
+			}
 			continue
 		}
-		if _, err := conn.Request(swayipc.Subscribe, []byte(`["window","workspace","shutdown"]`)); err != nil {
+		response, err := conn.Request(swayipc.Subscribe, []byte(`["window","workspace","shutdown"]`))
+		if err == nil {
+			err = swayipc.CheckSubscribeResponse(response)
+		}
+		if err != nil {
 			_ = conn.Close()
-			time.Sleep(time.Second)
+			if waitForDone(done, time.Second) {
+				return
+			}
 			continue
 		}
 
@@ -37,24 +44,38 @@ func subscribe(socket string, events chan<- struct{}, shutdown chan<- struct{}, 
 				_ = conn.Close()
 				break
 			}
-			var event struct {
-				Change string `json:"change"`
+			event, err := swayipc.DecodeEvent(message)
+			if err != nil {
+				_ = conn.Close()
+				break
 			}
-			_ = json.Unmarshal(message.Payload, &event)
-			if event.Change == "shutdown" {
+			if event.Type == swayipc.EventShutdown {
 				select {
-				case shutdown <- struct{}{}:
-				default:
+				case events <- event:
+				case <-done:
 				}
 				_ = conn.Close()
 				return
 			}
 			select {
-			case events <- struct{}{}:
+			case events <- event:
 			default:
 			}
 		}
-		time.Sleep(time.Second)
+		if waitForDone(done, time.Second) {
+			return
+		}
+	}
+}
+
+func waitForDone(done <-chan struct{}, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -69,18 +90,54 @@ func runLoopWithFPS(socket string, fps float64) int {
 	defer control.Close()
 
 	animator := NewTitleAnimator(control)
-	events := make(chan struct{}, 16)
-	shutdown := make(chan struct{}, 1)
+	events := make(chan swayipc.Event, 16)
 	done := make(chan struct{})
 	defer close(done)
-	go subscribe(socket, events, shutdown, done)
+	go subscribe(socket, events, done)
+
+	reporter := &sessionErrorReporter{}
+	sessionRuntime, err := newSessionRuntime(control)
+	if err != nil {
+		reporter.Report(err)
+		sessionRuntime = nil
+	}
+	snapshotTimer := time.NewTimer(time.Hour)
+	if !snapshotTimer.Stop() {
+		<-snapshotTimer.C
+	}
+	defer snapshotTimer.Stop()
+	var snapshotTimerChannel <-chan time.Time
+	resetSnapshotTimer := func() {
+		if !snapshotTimer.Stop() {
+			select {
+			case <-snapshotTimer.C:
+			default:
+			}
+		}
+		if sessionRuntime == nil {
+			snapshotTimerChannel = nil
+			return
+		}
+		deadline, scheduled := sessionRuntime.Deadline()
+		if !scheduled {
+			snapshotTimerChannel = nil
+			return
+		}
+		duration := time.Until(deadline)
+		if duration < 0 {
+			duration = 0
+		}
+		snapshotTimer.Reset(duration)
+		snapshotTimerChannel = snapshotTimer.C
+	}
 
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
 
 	phase := 0
-	animator.RefreshTree(phase)
+	reconcilePersistentSession(animator, sessionRuntime, phase, reporter.Report)
+	resetSnapshotTimer()
 	initialDuration := frameDuration(fps)
 	timer := time.NewTimer(initialDuration)
 	defer timer.Stop()
@@ -89,20 +146,32 @@ func runLoopWithFPS(socket string, fps float64) int {
 
 	for {
 		select {
-		case <-events:
-			animator.RefreshTree(phase)
+		case event := <-events:
+			if event.Type == swayipc.EventShutdown {
+				if sessionRuntime != nil {
+					sessionRuntime.Shutdown()
+				}
+				if err := animator.ResetAll(); err != nil {
+					fmt.Fprintf(os.Stderr, "Unable to reset all title formats: %v\n", err)
+				}
+				return 0
+			}
+			if event.AffectsSessionLayout() {
+				reconcilePersistentSession(animator, sessionRuntime, phase, reporter.Report)
+				resetSnapshotTimer()
+			} else {
+				_, _ = animator.RefreshTree(phase)
+			}
 			candidateFrames := animator.FramesUntilNextWake(phase)
 			candidateDuration := time.Duration(candidateFrames) * frameDuration(fps)
 			if time.Now().Add(candidateDuration).Before(nextWakeAt) {
 				nextFrames = candidateFrames
 				nextWakeAt = resetTimer(timer, candidateDuration)
 			}
-		case <-shutdown:
-			if err := animator.ResetAll(); err != nil {
-				fmt.Fprintf(os.Stderr, "Unable to reset all title formats: %v\n", err)
-			}
-			return 0
 		case <-signals:
+			if sessionRuntime != nil {
+				sessionRuntime.Shutdown()
+			}
 			if err := animator.ResetAll(); err != nil {
 				fmt.Fprintf(os.Stderr, "Unable to reset all title formats: %v\n", err)
 			}
@@ -112,6 +181,23 @@ func runLoopWithFPS(socket string, fps float64) int {
 			animator.Tick(phase)
 			nextFrames = animator.FramesUntilNextWake(phase)
 			nextWakeAt = resetTimer(timer, time.Duration(nextFrames)*frameDuration(fps))
+		case now := <-snapshotTimerChannel:
+			if sessionRuntime.ObservationDue(now) {
+				// Advance the deadline before I/O so a disconnected Sway socket
+				// cannot turn a due observation into a tight retry loop.
+				sessionRuntime.PostponeObservation(now)
+				reconcilePersistentSession(animator, sessionRuntime, phase, reporter.Report)
+			}
+			if sessionRuntime.StartupDue(now) {
+				reconcilePersistentSession(animator, sessionRuntime, phase, reporter.Report)
+				if sessionRuntime.StartupDue(time.Now()) {
+					sessionRuntime.PostponeStartup(time.Now())
+				}
+			}
+			if err := sessionRuntime.Flush(now); err != nil {
+				reporter.Report(err)
+			}
+			resetSnapshotTimer()
 		}
 	}
 }

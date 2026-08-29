@@ -233,10 +233,16 @@ The existing daemon already subscribes to Sway window, workspace, and shutdown
 events. Session persistence will retain typed event information instead of
 reducing every event to an empty notification.
 
-On a relevant event, the daemon obtains a fresh bounded `GET_TREE`, extracts
-only registered marked windows and their ancestors, computes a semantic hash,
-and schedules an atomic write after approximately one quiet second. Animation
-frames never trigger state writes by themselves.
+On a relevant structural or focus event, the daemon obtains a fresh bounded
+`GET_TREE`, extracts only registered marked windows and their ancestors,
+computes a semantic hash, and schedules an atomic write after approximately one
+quiet second. Animation frames and presentation-only title or urgency events
+never trigger or postpone state writes by themselves.
+
+Because Sway does not publish an IPC event for every resize or geometry
+change, an existing registry also enables a low-frequency semantic `GET_TREE`
+observation. Unchanged trees do not schedule writes, and a missing registry
+keeps this observation disabled.
 
 Before extracting a restorable tree, capture inspects the complete workspace.
 If it finds an unregistered tiled leaf alongside a managed leaf, it records the
@@ -251,6 +257,15 @@ Snapshot guards prevent destructive transient writes:
 - an IPC disconnect keeps the previous snapshot intact; and
 - restore-in-progress mutations are not considered the new user preference
   until the restore reaches a stable state.
+
+Startup waits up to ten seconds for active contexts already present in the
+previous snapshot. After that bounded settling period, a fresh observation may
+update complete workspaces while incomplete workspaces retain their last exact
+tree. Archived contexts do not block startup and keep their saved placement.
+
+Scratchpad contents are outside the version 1 restore contract. Moving a
+managed window temporarily to Sway's synthetic scratchpad workspace therefore
+does not replace its last saved real-workspace placement.
 
 ## Restore flow
 
@@ -412,6 +427,9 @@ deleting state.
 - Detect mixed managed/unregistered tiling and persist placement-only
   degradation.
 - Add debounced semantic snapshots and startup/shutdown guards.
+- Sample `GET_TREE` at a low frequency while a registry exists because Sway
+  does not emit IPC events for every resize or geometry change; animation
+  frames never drive session persistence.
 - Recognize stable application IDs, apply marks, and restore workspaces.
 
 ### Phase 3: Layout reconstruction

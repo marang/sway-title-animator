@@ -45,14 +45,20 @@ func NewTitleAnimator(ipc *swayipc.Client) *TitleAnimator {
 	}
 }
 
-func (animator *TitleAnimator) RefreshTree(phase int) {
+func (animator *TitleAnimator) RefreshTree(phase int) (*Node, error) {
+	if animator == nil || animator.ipc == nil {
+		return nil, errors.New("title animator has no Sway IPC client")
+	}
 	message, err := animator.ipc.Request(swayipc.GetTree, nil)
 	if err != nil {
-		return
+		return nil, err
+	}
+	if message.Type != swayipc.GetTree {
+		return nil, fmt.Errorf("unexpected Sway tree response type %d", message.Type)
 	}
 	var root Node
 	if err := json.Unmarshal(message.Payload, &root); err != nil {
-		return
+		return nil, fmt.Errorf("decode Sway tree: %w", err)
 	}
 
 	all := []nodeWithParent{}
@@ -94,6 +100,7 @@ func (animator *TitleAnimator) RefreshTree(phase int) {
 	for _, item := range windows {
 		animator.ApplyNode(item.node, item.parent, phase)
 	}
+	return &root, nil
 }
 
 func (animator *TitleAnimator) WindowLabel(node *Node) string {
@@ -240,25 +247,7 @@ func (animator *TitleAnimator) SetTitleFormat(conID int64, value string) error {
 	if err != nil {
 		return err
 	}
-	var results []struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error"`
-	}
-	if err := json.Unmarshal(message.Payload, &results); err != nil {
-		return fmt.Errorf("decode sway command response: %w", err)
-	}
-	if len(results) == 0 {
-		return errors.New("sway command returned no result")
-	}
-	for _, result := range results {
-		if !result.Success {
-			if result.Error == "" {
-				result.Error = "unknown sway command error"
-			}
-			return errors.New(result.Error)
-		}
-	}
-	return nil
+	return swayipc.CheckRunCommandResponse(message)
 }
 
 func (animator *TitleAnimator) shouldSetTitleFormat(conID int64, value string) bool {

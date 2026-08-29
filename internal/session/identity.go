@@ -65,6 +65,15 @@ func (id ContextID) AppID() (string, error) {
 	return AppIDPrefix + string(id), nil
 }
 
+// ParseAppID validates a managed-window application ID and extracts its
+// context identity.
+func ParseAppID(appID string) (ContextID, error) {
+	if !strings.HasPrefix(appID, AppIDPrefix) {
+		return "", fmt.Errorf("managed application ID must start with %q", AppIDPrefix)
+	}
+	return ParseContextID(strings.TrimPrefix(appID, AppIDPrefix))
+}
+
 // ParseMark validates a managed-window mark and extracts its context ID.
 func ParseMark(mark string) (ContextID, error) {
 	if !strings.HasPrefix(mark, MarkPrefix) {

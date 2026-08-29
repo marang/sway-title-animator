@@ -1,12 +1,30 @@
 package swayipc
 
-import "fmt"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+)
 
 // CommandOutcomeUnknownError reports a mutating request whose connection
 // failed after the exchange began. Callers must observe fresh compositor state
 // before deciding whether another command is needed.
 type CommandOutcomeUnknownError struct {
 	Cause error
+}
+
+// CommandResponseInvalidError reports a response which cannot establish
+// whether Sway accepted the command. Callers must re-observe before retrying.
+type CommandResponseInvalidError struct {
+	Cause error
+}
+
+func (err *CommandResponseInvalidError) Error() string {
+	return fmt.Sprintf("invalid sway command response leaves outcome unknown: %v", err.Cause)
+}
+
+func (err *CommandResponseInvalidError) Unwrap() error {
+	return err.Cause
 }
 
 func (err *CommandOutcomeUnknownError) Error() string {
@@ -71,6 +89,51 @@ func (client *Client) Request(messageType MessageType, payload []byte) (Message,
 
 func retryableReadOnlyRequest(messageType MessageType) bool {
 	return messageType == GetTree
+}
+
+// CheckRunCommandResponse verifies that Sway acknowledged every command in a
+// RUN_COMMAND response.
+func CheckRunCommandResponse(message Message) error {
+	if message.Type != RunCommand {
+		return &CommandResponseInvalidError{Cause: fmt.Errorf("unexpected response type %d", message.Type)}
+	}
+	var results []struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(message.Payload, &results); err != nil {
+		return &CommandResponseInvalidError{Cause: fmt.Errorf("decode response: %w", err)}
+	}
+	if len(results) == 0 {
+		return &CommandResponseInvalidError{Cause: errors.New("response contains no command result")}
+	}
+	for _, result := range results {
+		if result.Success {
+			continue
+		}
+		if result.Error == "" {
+			result.Error = "unknown sway command error"
+		}
+		return errors.New(result.Error)
+	}
+	return nil
+}
+
+// CheckSubscribeResponse verifies that Sway accepted the event subscription.
+func CheckSubscribeResponse(message Message) error {
+	if message.Type != Subscribe {
+		return fmt.Errorf("unexpected sway subscribe response type %d", message.Type)
+	}
+	var result struct {
+		Success bool `json:"success"`
+	}
+	if err := json.Unmarshal(message.Payload, &result); err != nil {
+		return fmt.Errorf("decode sway subscribe response: %w", err)
+	}
+	if !result.Success {
+		return errors.New("sway rejected event subscription")
+	}
+	return nil
 }
 
 func (client *Client) ensure() error {

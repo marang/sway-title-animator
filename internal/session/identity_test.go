@@ -30,6 +30,10 @@ func TestContextIdentityDerivesStableGenericContracts(t *testing.T) {
 	if appID != "sway-session.123e4567-e89b-12d3-a456-426614174000" {
 		t.Fatalf("unexpected application ID %q", appID)
 	}
+	parsedAppID, err := ParseAppID(appID)
+	if err != nil || parsedAppID != id {
+		t.Fatalf("parse application ID: id=%q err=%v", parsedAppID, err)
+	}
 }
 
 func TestContextIdentityRejectsNonCanonicalAndNilUUIDs(t *testing.T) {
@@ -45,6 +49,18 @@ func TestContextIdentityRejectsNonCanonicalAndNilUUIDs(t *testing.T) {
 				t.Fatalf("expected %q to be rejected", value)
 			}
 		})
+	}
+}
+
+func TestContextIdentityRejectsInvalidManagedApplicationIDs(t *testing.T) {
+	for _, value := range []string{
+		"Alacritty",
+		"sway-session.LAB-80",
+		"sway-session.00000000-0000-0000-0000-000000000000",
+	} {
+		if _, err := ParseAppID(value); err == nil {
+			t.Fatalf("expected application ID %q to be rejected", value)
+		}
 	}
 }
 

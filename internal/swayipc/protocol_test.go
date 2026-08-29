@@ -205,3 +205,44 @@ func TestClientDoesNotRepeatRunCommandAfterResponseConnectionFails(t *testing.T)
 		t.Fatalf("server: %v", err)
 	}
 }
+
+func TestCheckRunCommandResponseRequiresMatchingSuccessfulResults(t *testing.T) {
+	if err := CheckRunCommandResponse(Message{Type: RunCommand, Payload: []byte(`[{"success":true}]`)}); err != nil {
+		t.Fatalf("expected successful command response: %v", err)
+	}
+	for _, message := range []Message{
+		{Type: GetTree, Payload: []byte(`[{"success":true}]`)},
+		{Type: RunCommand, Payload: []byte(`[]`)},
+		{Type: RunCommand, Payload: []byte(`[{"success":false,"error":"denied"}]`)},
+		{Type: RunCommand, Payload: []byte(`not-json`)},
+	} {
+		if err := CheckRunCommandResponse(message); err == nil {
+			t.Fatalf("expected command response to be rejected: %+v", message)
+		}
+	}
+	for _, message := range []Message{
+		{Type: GetTree, Payload: []byte(`[{"success":true}]`)},
+		{Type: RunCommand, Payload: []byte(`[]`)},
+		{Type: RunCommand, Payload: []byte(`not-json`)},
+	} {
+		var invalid *CommandResponseInvalidError
+		if err := CheckRunCommandResponse(message); !errors.As(err, &invalid) {
+			t.Fatalf("expected invalid response error, got %v", err)
+		}
+	}
+}
+
+func TestCheckSubscribeResponseRequiresMatchingSuccess(t *testing.T) {
+	if err := CheckSubscribeResponse(Message{Type: Subscribe, Payload: []byte(`{"success":true}`)}); err != nil {
+		t.Fatalf("expected successful subscription response: %v", err)
+	}
+	for _, message := range []Message{
+		{Type: RunCommand, Payload: []byte(`{"success":true}`)},
+		{Type: Subscribe, Payload: []byte(`{"success":false}`)},
+		{Type: Subscribe, Payload: []byte(`not-json`)},
+	} {
+		if err := CheckSubscribeResponse(message); err == nil {
+			t.Fatalf("expected subscription response to be rejected: %+v", message)
+		}
+	}
+}
