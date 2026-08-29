@@ -26,6 +26,7 @@ const (
 
 type herdrAPIEndpoint struct {
 	directoryFD int
+	socketFD    int
 	socketStat  unix.Stat_t
 }
 
@@ -150,16 +151,25 @@ func openHerdrAPIEndpoint(rootPath string, sessionName string) (*herdrAPIEndpoin
 		_ = unix.Close(directoryFD)
 		return nil, errors.New("herdr named-session path must be a directory owned by the current user")
 	}
+	// Pin and later dial the exact socket inode through procfs. A path-based
+	// reconnect could otherwise reach a same-UID replacement between checks.
+	socketFD, err := unix.Openat(directoryFD, herdrAgentSocketName, unix.O_PATH|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		_ = unix.Close(directoryFD)
+		return nil, fmt.Errorf("open Herdr API socket: %w", err)
+	}
 	var socketStat unix.Stat_t
-	if err := unix.Fstatat(directoryFD, herdrAgentSocketName, &socketStat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+	if err := unix.Fstat(socketFD, &socketStat); err != nil {
+		_ = unix.Close(socketFD)
 		_ = unix.Close(directoryFD)
 		return nil, fmt.Errorf("inspect Herdr API socket: %w", err)
 	}
 	if err := validateHerdrSocket(socketStat); err != nil {
+		_ = unix.Close(socketFD)
 		_ = unix.Close(directoryFD)
 		return nil, err
 	}
-	return &herdrAPIEndpoint{directoryFD: directoryFD, socketStat: socketStat}, nil
+	return &herdrAPIEndpoint{directoryFD: directoryFD, socketFD: socketFD, socketStat: socketStat}, nil
 }
 
 func validateHerdrSocket(stat unix.Stat_t) error {
@@ -170,7 +180,14 @@ func validateHerdrSocket(stat unix.Stat_t) error {
 }
 
 func (endpoint *herdrAPIEndpoint) Close() {
-	if endpoint != nil && endpoint.directoryFD >= 0 {
+	if endpoint == nil {
+		return
+	}
+	if endpoint.socketFD >= 0 {
+		_ = unix.Close(endpoint.socketFD)
+		endpoint.socketFD = -1
+	}
+	if endpoint.directoryFD >= 0 {
 		_ = unix.Close(endpoint.directoryFD)
 		endpoint.directoryFD = -1
 	}
@@ -187,7 +204,7 @@ func (endpoint *herdrAPIEndpoint) request(ctx context.Context, requestID string,
 		return nil, fmt.Errorf("encode Herdr request: %w", err)
 	}
 	encoded = append(encoded, '\n')
-	socketPath := fmt.Sprintf("/proc/self/fd/%d/%s", endpoint.directoryFD, herdrAgentSocketName)
+	socketPath := fmt.Sprintf("/proc/self/fd/%d", endpoint.socketFD)
 	dialer := net.Dialer{}
 	connection, err := dialer.DialContext(ctx, "unix", socketPath)
 	if err != nil {

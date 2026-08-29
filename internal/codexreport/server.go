@@ -26,6 +26,7 @@ type Handler func(context.Context, Report) error
 type Server struct {
 	listener    *net.UnixListener
 	directory   *os.File
+	socketFD    int
 	socketName  string
 	socketStat  unix.Stat_t
 	handler     Handler
@@ -63,27 +64,40 @@ func StartServer(socketPath string, handler Handler, reportError func(error)) (*
 		return nil, fmt.Errorf("listen on Codex report socket: %w", err)
 	}
 	listener.SetUnlinkOnClose(false)
-	if err := unix.Fchmodat(int(directory.Fd()), socketName, 0o600, 0); err != nil {
+	socketFD, socketStat, err := pinSocketAt(directory, socketName)
+	if err != nil {
 		_ = listener.Close()
-		_ = unix.Unlinkat(int(directory.Fd()), socketName, 0)
-		cleanup()
-		return nil, fmt.Errorf("restrict Codex report socket: %w", err)
-	}
-	var socketStat unix.Stat_t
-	if err := unix.Fstatat(int(directory.Fd()), socketName, &socketStat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-		_ = listener.Close()
-		_ = unix.Unlinkat(int(directory.Fd()), socketName, 0)
 		cleanup()
 		return nil, fmt.Errorf("inspect Codex report socket: %w", err)
 	}
-	if socketStat.Mode&unix.S_IFMT != unix.S_IFSOCK || socketStat.Uid != uint32(os.Geteuid()) || socketStat.Mode&0o777 != 0o600 {
+	closeSetup := func() {
 		_ = listener.Close()
-		_ = unix.Unlinkat(int(directory.Fd()), socketName, 0)
+		_ = unix.Close(socketFD)
 		cleanup()
+	}
+	if socketStat.Mode&unix.S_IFMT != unix.S_IFSOCK || socketStat.Uid != uint32(os.Geteuid()) {
+		closeSetup()
+		return nil, errors.New("codex report endpoint is not a socket owned by the current user")
+	}
+	if err := unix.Fchmodat(int(directory.Fd()), socketName, 0o600, 0); err != nil {
+		closeSetup()
+		return nil, fmt.Errorf("restrict Codex report socket: %w", err)
+	}
+	if err := unix.Fstat(socketFD, &socketStat); err != nil {
+		closeSetup()
+		return nil, fmt.Errorf("inspect Codex report socket: %w", err)
+	}
+	var currentSocket unix.Stat_t
+	if err := unix.Fstatat(int(directory.Fd()), socketName, &currentSocket, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		closeSetup()
+		return nil, fmt.Errorf("reinspect Codex report socket: %w", err)
+	}
+	if !sameSocketFile(currentSocket, socketStat) || socketStat.Mode&0o777 != 0o600 {
+		closeSetup()
 		return nil, errors.New("codex report endpoint is not an owner-only socket")
 	}
 	server := &Server{
-		listener: listener, directory: directory, socketName: socketName, socketStat: socketStat,
+		listener: listener, directory: directory, socketFD: socketFD, socketName: socketName, socketStat: socketStat,
 		handler: handler, reportError: reportError, done: make(chan struct{}), workers: make(chan struct{}, 8),
 	}
 	server.wait.Add(1)
@@ -100,18 +114,18 @@ func removeStaleSocketWithProbe(
 	name string,
 	probe func(string, string, time.Duration) (net.Conn, error),
 ) error {
-	var stat unix.Stat_t
-	err := unix.Fstatat(int(directory.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	socketFD, stat, err := pinSocketAt(directory, name)
 	if errors.Is(err, unix.ENOENT) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("inspect existing Codex report endpoint: %w", err)
 	}
+	defer unix.Close(socketFD)
 	if stat.Mode&unix.S_IFMT != unix.S_IFSOCK || stat.Uid != uint32(os.Geteuid()) {
 		return errors.New("existing Codex report endpoint is not a socket owned by the current user")
 	}
-	descriptorPath := fmt.Sprintf("/proc/self/fd/%d/%s", directory.Fd(), name)
+	descriptorPath := fmt.Sprintf("/proc/self/fd/%d", socketFD)
 	connection, dialErr := probe("unix", descriptorPath, 100*time.Millisecond)
 	if dialErr == nil {
 		_ = connection.Close()
@@ -129,13 +143,45 @@ func removeStaleSocketWithProbe(
 	} else if err != nil {
 		return fmt.Errorf("reinspect existing Codex report endpoint: %w", err)
 	}
-	if current.Dev != stat.Dev || current.Ino != stat.Ino {
+	if !sameSocketFile(current, stat) {
 		return syscall.EADDRINUSE
 	}
 	if err := unix.Unlinkat(int(directory.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
 		return fmt.Errorf("remove stale Codex report socket: %w", err)
 	}
 	return nil
+}
+
+func pinSocketAt(directory *os.File, name string) (int, unix.Stat_t, error) {
+	// Holding an O_PATH reference prevents an unlinked socket inode from being
+	// recycled into a replacement that would pass a later device/inode check.
+	fd, err := unix.Openat(int(directory.Fd()), name, unix.O_PATH|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return -1, unix.Stat_t{}, err
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		_ = unix.Close(fd)
+		return -1, unix.Stat_t{}, err
+	}
+	return fd, stat, nil
+}
+
+func sameSocketFile(left unix.Stat_t, right unix.Stat_t) bool {
+	return left.Dev == right.Dev && left.Ino == right.Ino
+}
+
+func unlinkPinnedSocket(directory *os.File, name string, pinned unix.Stat_t) error {
+	var current unix.Stat_t
+	if err := unix.Fstatat(int(directory.Fd()), name, &current, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if !sameSocketFile(current, pinned) {
+		return syscall.EADDRINUSE
+	}
+	return unix.Unlinkat(int(directory.Fd()), name, 0)
 }
 
 func (server *Server) serve() {
@@ -266,14 +312,10 @@ func (server *Server) Close() error {
 		close(server.done)
 		closeErr = server.listener.Close()
 		server.wait.Wait()
-		var current unix.Stat_t
-		if err := unix.Fstatat(int(server.directory.Fd()), server.socketName, &current, unix.AT_SYMLINK_NOFOLLOW); err == nil {
-			if current.Dev == server.socketStat.Dev && current.Ino == server.socketStat.Ino {
-				closeErr = errors.Join(closeErr, unix.Unlinkat(int(server.directory.Fd()), server.socketName, 0))
-			}
-		} else if !errors.Is(err, unix.ENOENT) {
+		if err := unlinkPinnedSocket(server.directory, server.socketName, server.socketStat); err != nil && !errors.Is(err, syscall.EADDRINUSE) {
 			closeErr = errors.Join(closeErr, err)
 		}
+		closeErr = errors.Join(closeErr, unix.Close(server.socketFD))
 		closeErr = errors.Join(closeErr, server.directory.Close())
 	})
 	return closeErr

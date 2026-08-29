@@ -118,6 +118,75 @@ func TestReportHerdrCodexSessionRejectsUnsafeEndpointBeforeConnect(t *testing.T)
 	}
 }
 
+func TestHerdrEndpointPinsSocketAcrossPathReplacement(t *testing.T) {
+	root := privateHerdrRoot(t)
+	sessionDir := filepath.Join(root, "sessions", "lab-80")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	socketPath := filepath.Join(sessionDir, herdrAgentSocketName)
+	original, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original.SetUnlinkOnClose(false)
+	defer original.Close()
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := openHerdrAPIEndpoint(root, "lab-80")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+
+	originalPath := socketPath + ".original"
+	if err := os.Rename(socketPath, originalPath); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Close()
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	originalAccepted := make(chan error, 1)
+	go func() {
+		connection, err := original.AcceptUnix()
+		if err == nil {
+			_ = connection.Close()
+		}
+		originalAccepted <- err
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := endpoint.request(ctx, "request", "pane.process_info", map[string]string{"pane_id": "work:p1"}); err == nil {
+		t.Fatal("replaced Herdr socket path was accepted")
+	}
+	select {
+	case err := <-originalAccepted:
+		if err != nil {
+			t.Fatalf("pinned original endpoint was not contacted: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pinned original endpoint was not contacted")
+	}
+	if err := replacement.SetDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := replacement.AcceptUnix()
+	if err == nil {
+		_ = connection.Close()
+		t.Fatal("replacement endpoint received the pinned request")
+	}
+	if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
+		t.Fatalf("inspect replacement endpoint: %v", err)
+	}
+}
+
 func TestProcessDescendsFromUsesActualProcAncestry(t *testing.T) {
 	parent, err := readParentPID(os.Getpid())
 	if err != nil {
