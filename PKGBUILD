@@ -1,3 +1,7 @@
+# Maintainer: marang <1550038+marang@users.noreply.github.com>
+# Release template: the AUR workflow replaces pkgver and sha256sums from the
+# pushed version tag, resets pkgrel to 1, verifies the resulting source, and
+# builds it before push.
 pkgname=sway-title-animator
 pkgver=0.1.0
 pkgrel=1
@@ -12,14 +16,31 @@ optdepends=(
   'herdr: persistent terminal panes, history, and agent sessions'
   'apparmor: secure Codex resume boundary'
 )
-makedepends=('go>=1.26')
+makedepends=('go>=1.26.5')
+options=('!debug')
 source=("sway-title-animator-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
+_go_build_flags=(-buildmode=pie -trimpath -buildvcs=false -mod=readonly -modcacherw)
+_go_ldflags=(-s -w -buildid=)
+
 build() {
   cd "sway-title-animator-$pkgver"
-  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o sway-title-animator ./cmd/sway-title-animator
-  CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o sway-session ./cmd/sway-session
+  export GOCACHE="$srcdir/go-build"
+  export GOMODCACHE="$srcdir/go-mod"
+  export GOTOOLCHAIN=local
+
+  CGO_ENABLED=0 go build "${_go_build_flags[@]}" -ldflags="${_go_ldflags[*]}" -o sway-title-animator ./cmd/sway-title-animator
+  CGO_ENABLED=0 go build "${_go_build_flags[@]}" -ldflags="${_go_ldflags[*]}" -o sway-session ./cmd/sway-session
+}
+
+check() {
+  cd "sway-title-animator-$pkgver"
+  export GOCACHE="$srcdir/go-build"
+  export GOMODCACHE="$srcdir/go-mod"
+  export GOTOOLCHAIN=local
+
+  CGO_ENABLED=0 go test "${_go_build_flags[@]}" -count=1 ./...
 }
 
 package() {
