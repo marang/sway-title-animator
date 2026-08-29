@@ -92,6 +92,14 @@ func StartServer(socketPath string, handler Handler, reportError func(error)) (*
 }
 
 func removeStaleSocket(directory *os.File, name string) error {
+	return removeStaleSocketWithProbe(directory, name, net.DialTimeout)
+}
+
+func removeStaleSocketWithProbe(
+	directory *os.File,
+	name string,
+	probe func(string, string, time.Duration) (net.Conn, error),
+) error {
 	var stat unix.Stat_t
 	err := unix.Fstatat(int(directory.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
 	if errors.Is(err, unix.ENOENT) {
@@ -104,9 +112,24 @@ func removeStaleSocket(directory *os.File, name string) error {
 		return errors.New("existing Codex report endpoint is not a socket owned by the current user")
 	}
 	descriptorPath := fmt.Sprintf("/proc/self/fd/%d/%s", directory.Fd(), name)
-	connection, dialErr := net.DialTimeout("unix", descriptorPath, 100*time.Millisecond)
+	connection, dialErr := probe("unix", descriptorPath, 100*time.Millisecond)
 	if dialErr == nil {
 		_ = connection.Close()
+		return syscall.EADDRINUSE
+	}
+	if errors.Is(dialErr, unix.ENOENT) {
+		return nil
+	}
+	if !errors.Is(dialErr, unix.ECONNREFUSED) {
+		return fmt.Errorf("probe existing Codex report endpoint: %w", dialErr)
+	}
+	var current unix.Stat_t
+	if err := unix.Fstatat(int(directory.Fd()), name, &current, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("reinspect existing Codex report endpoint: %w", err)
+	}
+	if current.Dev != stat.Dev || current.Ino != stat.Ino {
 		return syscall.EADDRINUSE
 	}
 	if err := unix.Unlinkat(int(directory.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
