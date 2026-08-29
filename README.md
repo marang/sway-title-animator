@@ -144,9 +144,11 @@ This installs:
 
 Make sure `~/.local/bin` is in your `PATH`.
 
-Release archives and distribution packages also contain both programs. Packaged
-copies of the Sway, Herdr, Codex-hook, and AppArmor integration templates live
-under `/usr/share/doc/sway-title-animator`.
+Release archives and distribution packages also contain both programs and the
+Sway, Herdr, Codex-hook, and AppArmor integration templates. Archives retain
+the repository-relative template paths; distribution packages install them
+under `/usr/share/doc/sway-title-animator`. The differing paths are called out
+below.
 
 ## Sway Setup
 
@@ -204,7 +206,8 @@ sway-session purge --yes LAB-80
 Archive excludes a context from automatic restore while retaining its Herdr
 state. Purge stops and deletes the exact named Herdr session before removing
 the registry entry; without `--yes`, it requires a terminal and the full UUID.
-Use `--json` for stable machine-readable results and diagnostics.
+Use the global option before a command, for example `sway-session --json list`,
+for stable machine-readable results and diagnostics.
 
 For automatic startup, add both lines to the Sway config:
 
@@ -238,11 +241,16 @@ Enable Codex hooks in `~/.codex/config.toml`:
 hooks = true
 ```
 
-Merge the `SessionStart` entry from `contrib/codex/hooks.json` into
-`~/.codex/hooks.json`. Do not retain Herdr's stock Codex SessionStart hook: it
-connects directly to the general Herdr socket and defeats this boundary. The
-managed Alacritty launch injects `SWAY_SESSION_CONTEXT_ID`; Herdr supplies
-`HERDR_PANE_ID`, so the hook is a silent no-op in other terminals.
+After a source `make install`, merge the `SessionStart` entry from
+`contrib/codex/hooks.json` into `~/.codex/hooks.json`; it uses
+`~/.local/bin/sway-session`. Distribution-package users should instead merge
+`/usr/share/doc/sway-title-animator/contrib/codex/hooks.json`, which uses
+`/usr/bin/sway-session`. When installing from a release archive into another
+location, change the hook command to that exact absolute binary path. Do not
+retain Herdr's stock Codex SessionStart hook: it connects directly to the
+general Herdr socket and defeats this boundary. The managed Alacritty launch
+injects `SWAY_SESSION_CONTEXT_ID`; Herdr supplies `HERDR_PANE_ID`, so the hook
+is a silent no-op in other terminals.
 On the next Codex start, review this exact command in the Hooks prompt and trust
 it; untrusted hooks do not run.
 
@@ -253,12 +261,17 @@ sudo install -m 0644 contrib/apparmor/codex-home-guard /etc/apparmor.d/codex-hom
 sudo apparmor_parser -r /etc/apparmor.d/codex-home-guard
 ```
 
+For a distribution-package install, use
+`/usr/share/doc/sway-title-animator/contrib/apparmor/codex-home-guard` as the
+source path in the first command.
+
 The template assumes the default XDG paths under `~/.config` and
 `~/.local/state`; adjust its two state-root rules before loading it when custom
 XDG roots are in use. The policy denies Herdr history and control sockets,
 `sway-session` state, and Sway IPC while allowing only
-`$XDG_RUNTIME_DIR/sway-session/codex-report.sock`. Use
-`scripts/verify-codex-boundary.sh` from the matching Herdr pane for a live
+`$XDG_RUNTIME_DIR/sway-session/codex-report.sock`. From the matching Herdr pane,
+run `scripts/verify-codex-boundary.sh` in a source checkout or the packaged
+`/usr/share/doc/sway-title-animator/scripts/verify-codex-boundary.sh` for a live
 positive/negative enforcement check after the profile, Herdr, and one
 registered context are active.
 

@@ -51,7 +51,9 @@ archives:
       - contrib/sway/45-title-animator.conf
       - contrib/herdr/config.toml
       - contrib/codex/hooks.json
+      - contrib/codex/hooks-system.json
       - contrib/apparmor/codex-home-guard
+      - scripts/verify-codex-boundary.sh
 
 checksum:
   name_template: checksums.txt
@@ -81,10 +83,14 @@ nfpms:
         dst: /usr/share/doc/sway-title-animator/45-title-animator.conf
       - src: ./contrib/herdr/config.toml
         dst: /usr/share/doc/sway-title-animator/contrib/herdr/config.toml
-      - src: ./contrib/codex/hooks.json
+      - src: ./contrib/codex/hooks-system.json
         dst: /usr/share/doc/sway-title-animator/contrib/codex/hooks.json
       - src: ./contrib/apparmor/codex-home-guard
         dst: /usr/share/doc/sway-title-animator/contrib/apparmor/codex-home-guard
+      - src: ./scripts/verify-codex-boundary.sh
+        dst: /usr/share/doc/sway-title-animator/scripts/verify-codex-boundary.sh
+        file_info:
+          mode: 0755
 
 release:
   github:

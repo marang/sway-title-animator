@@ -14,7 +14,9 @@ git push origin v0.1.0
 GoReleaser builds `sway-title-animator` and `sway-session` in Linux archives for
 `amd64` and `arm64`, plus Linux `deb` and `rpm` packages. The archives and
 packages also carry the Sway, Herdr, Codex-hook, and AppArmor integration
-templates.
+templates plus the live Codex-boundary verification script. Package builds use
+the `/usr/bin/sway-session` Codex-hook variant; source installs keep the
+`~/.local/bin/sway-session` variant.
 
 ## AUR
 
