@@ -191,10 +191,10 @@ the compositor started. The only workspaces were `98: LAB-106 A` and
 - Two sequential `terminal --new` calls produced different context UUIDs,
   UUID-derived application IDs, and Herdr session names, and mapped exactly one
   marked window to each workspace.
-- The post-review rerun persisted registry schema 4 and required
-  `launcher.terminal.instance: true` on both new contexts before continuing.
-  Separate migration tests preserve exact v3 bytes and keep a pre-existing
-  naming lookalike classified as `manual`.
+- The post-review rerun persisted registry schema 4 and therefore predates the
+  current schema-5 release candidate and its reset-only state contract. It
+  remains evidence for the outer-window and independent-instance behavior only;
+  it is not schema-5 release evidence.
 - `terminal list` reported both as independent `instance` identities, while
   the daemon captured both placements in owner-only `contexts.json` and
   `layout.json` files.
@@ -212,6 +212,25 @@ The transient service used `KillMode=control-group`, a three-minute runtime
 limit, and exact temporary-root identity checks. It terminated all private
 compositor descendants and removed the isolated root after the successful
 run. It never addressed or mutated the interactive Sway compositor.
+
+### Required schema-5 release rerun
+
+Before releasing a build whose registry schema is 5, repeat the isolated
+headless procedure on workspace 98 or higher from a fresh schema-5 state root.
+Create a fresh terminal instance, verify that `contexts.json` validates as
+schema 5, and verify:
+
+- closing and restoring the registered terminal instance returns its marked
+  outer window to the saved high-numbered workspace while the animator is not
+  running;
+- foreign inherited `HERDR_*` values are absent while the validated
+  `HERDR_CONFIG_PATH` for the isolated test root reaches the launched Herdr
+  child; and
+- a daemon restart performs no duplicate launch or mark creation.
+
+Record the date, installed/source commit, Sway and Herdr versions, isolated
+workspace numbers, and cleanup result here. Until that record exists, the
+LAB-106 entry above is not sufficient schema-5 release evidence.
 
 This document records the manual LAB-80 evidence gathered on 2026-08-29. It
 separates the outer Sway restore from components which were not available in
