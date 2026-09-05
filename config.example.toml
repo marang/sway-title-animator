@@ -32,8 +32,8 @@ presets = [
   "spline",
 ]
 
-# Application persistence indicators are emitted by sway-session daemon and
-# rendered immediately before the app icon by the independent title animator.
+# Presentation indicators are decoded from versioned Sway marks and rendered
+# immediately before the app icon. An external session manager may emit them.
 # Defaults are single-column glyphs available in Noto Sans Mono.
 [indicators]
 unregistered = "○"
