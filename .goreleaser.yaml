@@ -23,22 +23,7 @@ builds:
     goarch:
       - amd64
       - arm64
-  - id: sway-session
-    main: ./cmd/sway-session
-    binary: sway-session
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-      - -buildvcs=false
-    ldflags:
-      - -s -w -buildid=
-    mod_timestamp: "{{ .CommitTimestamp }}"
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
+
 archives:
   - id: bundles
     formats: [tar.gz]
@@ -48,15 +33,6 @@ archives:
       - README.md
       - config.example.toml
       - contrib/sway/45-title-animator.conf
-      - contrib/herdr/config.toml
-      - contrib/sway-session/config.toml
-      - contrib/codex/hooks.json
-      - contrib/codex/hooks-system.json
-      - contrib/apparmor/codex-home-guard
-      - contrib/completions/bash/sway-session
-      - contrib/completions/zsh/_sway-session
-      - contrib/completions/fish/sway-session.fish
-      - scripts/verify-codex-boundary.sh
 
 checksum:
   name_template: checksums.txt
@@ -64,7 +40,7 @@ checksum:
 nfpms:
   - id: linux-packages
     package_name: sway-title-animator
-    ids: [sway-title-animator, sway-session]
+    ids: [sway-title-animator]
     formats: [deb, rpm]
     maintainer: "sway-title-animator Authors"
     description: "Animated Unicode titlebars for Sway"
@@ -82,28 +58,6 @@ nfpms:
         dst: /usr/share/doc/sway-title-animator/config.example.toml
       - src: ./contrib/sway/45-title-animator.conf
         dst: /usr/share/doc/sway-title-animator/45-title-animator.conf
-      - src: ./contrib/herdr/config.toml
-        dst: /usr/share/doc/sway-title-animator/contrib/herdr/config.toml
-      - src: ./contrib/sway-session/config.toml
-        dst: /usr/share/doc/sway-title-animator/contrib/sway-session/config.toml
-      - src: ./contrib/codex/hooks-system.json
-        dst: /usr/share/doc/sway-title-animator/contrib/codex/hooks.json
-      - src: ./contrib/apparmor/codex-home-guard
-        dst: /usr/share/doc/sway-title-animator/contrib/apparmor/codex-home-guard
-      - src: ./scripts/verify-codex-boundary.sh
-        dst: /usr/share/doc/sway-title-animator/scripts/verify-codex-boundary.sh
-        file_info:
-          mode: 0755
-      - src: ./contrib/completions/bash/sway-session
-        dst: /usr/share/bash-completion/completions/sway-session
-      - src: ./contrib/completions/zsh/_sway-session
-        dst: /usr/share/zsh/vendor-completions/_sway-session
-        packager: deb
-      - src: ./contrib/completions/zsh/_sway-session
-        dst: /usr/share/zsh/site-functions/_sway-session
-        packager: rpm
-      - src: ./contrib/completions/fish/sway-session.fish
-        dst: /usr/share/fish/vendor_completions.d/sway-session.fish
 
 release:
   github:

@@ -1,7 +1,0 @@
-# sway-session accepts only compiled terminal adapters. This value selects the
-# typed argv shape; it is not an executable path or a shell command template.
-version = 2
-
-[terminal]
-adapter = "alacritty"
-session_manager = "herdr"
