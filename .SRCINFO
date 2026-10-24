@@ -6,7 +6,7 @@ pkgbase = sway-title-animator
 	arch = x86_64
 	arch = aarch64
 	license = MIT
-	makedepends = go>=1.26.5
+	makedepends = go>=1.26.10
 	depends = sway
 	options = !debug
 	source = sway-title-animator-0.10.0.tar.gz::https://github.com/marang/sway-title-animator/archive/refs/tags/v0.10.0.tar.gz

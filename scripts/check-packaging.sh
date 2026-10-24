@@ -77,7 +77,7 @@ reject_fixed .goreleaser.yaml '      - golang'
 require_fixed PKGBUILD '# Maintainer: marang <1550038+marang@users.noreply.github.com>'
 require_fixed PKGBUILD '# Release template:'
 require_fixed PKGBUILD "depends=('sway')"
-require_fixed PKGBUILD "makedepends=('go>=1.26.5')"
+require_fixed PKGBUILD "makedepends=('go>=1.26.10')"
 require_fixed PKGBUILD "options=('!debug')"
 require_fixed PKGBUILD '_go_build_flags=(-buildmode=pie -trimpath -buildvcs=false -mod=readonly -modcacherw)'
 require_fixed PKGBUILD '_go_ldflags=(-s -w -buildid=)'
@@ -99,7 +99,7 @@ reject_fixed PKGBUILD 'noto-fonts:'
 # .SRCINFO stays at the last released archive until the release workflow writes
 # exact v0.10.0 metadata; it must still express the animator's runtime contract.
 require_fixed .SRCINFO 'depends = sway'
-require_fixed .SRCINFO 'makedepends = go>=1.26.5'
+require_fixed .SRCINFO 'makedepends = go>=1.26.10'
 reject_regex .SRCINFO '^[[:space:]]*optdepends[[:space:]]*='
 reject_fixed .SRCINFO 'depends = sqlite'
 reject_fixed .SRCINFO 'optdepends = noto-fonts:'
@@ -124,8 +124,8 @@ require_fixed .github/workflows/aur.yml 'show-ref --verify --quiet "refs/tags/$V
 require_fixed .github/workflows/aur.yml 'git -c safe.directory="$GITHUB_WORKSPACE"'
 require_fixed .github/workflows/aur.yml 'merge-base --is-ancestor "$tag_commit" origin/main'
 require_fixed .github/workflows/release.yml 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main'
-require_fixed .github/workflows/aur.yml 'actions/upload-artifact@v4'
-require_fixed .github/workflows/aur.yml 'actions/download-artifact@v4'
+require_fixed .github/workflows/aur.yml 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
+require_fixed .github/workflows/aur.yml 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333'
 require_fixed .github/workflows/aur.yml 'group: aur-release'
 require_fixed .github/workflows/aur.yml 'persist-credentials: false'
 require_fixed .github/workflows/aur.yml 'needs: publish-aur'

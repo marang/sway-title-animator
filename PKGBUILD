@@ -10,7 +10,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/marang/sway-title-animator"
 license=('MIT')
 depends=('sway')
-makedepends=('go>=1.26.5')
+makedepends=('go>=1.26.10')
 options=('!debug')
 source=("sway-title-animator-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('dddd4085ac75757fd156862409a4c99d78e81ac6952fb4edfb6c296e075ce4f7')
