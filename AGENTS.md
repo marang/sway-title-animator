@@ -17,7 +17,7 @@ make verify
 This checks formatting, unit tests, race tests, `go vet`, `staticcheck`, the
 `CGO_ENABLED=0` build, and whitespace errors. Use `make fmt` or `gofmt` on
 changed Go files. The module requires Go 1.26; the preferred patched toolchain
-is Go 1.26.5 as declared in `go.mod`.
+is Go 1.26.10 as declared in `go.mod`.
 
 ## Workflow
 
